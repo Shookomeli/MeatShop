@@ -93,9 +93,19 @@ class Product(models.Model):
             if self.parent == self:
                 return self
             return self.parent.get_parent()
+
+        # Phase 5: Ambiguity Reporting
         # Fallback: look up designated parent product in this category
-        cat_parent = Product.objects.filter(category=self.category, is_parent=True).order_by('id').first()
-        if cat_parent and cat_parent.id != self.id:
+        parents = list(Product.objects.filter(category=self.category, is_parent=True).order_by('id'))
+        if not parents:
+            return None
+
+        if len(parents) > 1:
+            # Cannot automatically determine parent. Return None to indicate ambiguity safely.
+            return None
+
+        cat_parent = parents[0]
+        if cat_parent.id != self.id:
             return cat_parent
         return None
 
@@ -122,15 +132,43 @@ class Product(models.Model):
         # If code is blank string, store as None to avoid unique constraint violations
         if self.code is not None and not self.code.strip():
             self.code = None
-        if self.parent_id and self.id and self.parent_id == self.id:
-            raise ValidationError({'parent': 'یک کالا نمی‌تواند والد خودش باشد.'})
+
+        if self.parent_id:
+            if self.id and self.parent_id == self.id:
+                raise ValidationError({'parent': 'یک کالا نمی‌تواند والد خودش باشد.'})
+
+            # Check if parent is actually a parent product
+            if self.parent and not self.parent.is_parent:
+                raise ValidationError({'parent': 'کالای انتخاب شده به عنوان والد، خود یک کالای والد نیست.'})
+
+            # Circular dependency check
+            visited = set()
+            current_parent = self.parent
+            while current_parent is not None:
+                if current_parent.id in visited:
+                    break
+                visited.add(current_parent.id)
+                if self.id and current_parent.id == self.id:
+                    raise ValidationError({'parent': 'ارجاع حلقوی در انتخاب والد مجاز نیست.'})
+                current_parent = current_parent.parent
+
+        if self.is_parent and self.parent_id is not None:
+            raise ValidationError({'parent': 'کالای والد نمی‌تواند خود دارای والد باشد.'})
 
     def save(self, *args, **kwargs):
         if self.code is not None and not self.code.strip():
             self.code = None
+
+        # Only attempt to auto-assign a parent if there's no ambiguity.
         if not self.is_parent and self.parent_id is None and self.category_id:
-            cat_parent = Product.objects.filter(category_id=self.category_id, is_parent=True).order_by('id').first()
-            if cat_parent and cat_parent.id != self.id:
-                self.parent = cat_parent
+            parents = list(Product.objects.filter(category_id=self.category_id, is_parent=True).order_by('id'))
+            if len(parents) == 1:
+                cat_parent = parents[0]
+                if cat_parent.id != self.id:
+                    self.parent = cat_parent
+            elif len(parents) > 1:
+                # Do NOT auto-assign and hide the ambiguity. It's better to let validation or the user handle it.
+                pass
+
         self.full_clean()
         super().save(*args, **kwargs)

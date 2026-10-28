@@ -84,12 +84,17 @@ class ProductCatalogueTestCase(TestCase):
         # Child product resolves to parent
         self.assertEqual(self.product1.get_parent(), self.parent_chicken)
         # Sub-child also resolves to root parent
-        sub_child = Product.objects.create(
-            name="فیله خرد شده",
-            category=self.cat_chicken,
-            parent=self.product1
-        )
-        self.assertEqual(sub_child.get_parent(), self.parent_chicken)
+        # Previously sub-child tested recursive parent lookup via a child,
+        # but with Phase 5 integrity, parents MUST have is_parent=True.
+        # Thus, attempting to link a sub_child to product1 (which is not a parent)
+        # will now rightly raise a ValidationError.
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
+            sub_child = Product.objects.create(
+                name="فیله خرد شده",
+                category=self.cat_chicken,
+                parent=self.product1
+            )
 
     def test_product_cannot_be_own_parent(self):
         with self.assertRaises(ValidationError):
@@ -305,6 +310,27 @@ class ProductCatalogueCategoryIntegrityTestCase(TestCase):
         )
         self.assertEqual(cut.parent, self.parent_chicken)
 
+    def test_auto_parent_assignment_ambiguity(self):
+        """If there are multiple parent products, the system should NOT silently choose one."""
+        # Create a second parent in the same category
+        Product.objects.create(
+            category=self.cat_chicken,
+            name="مرغ دوم",
+            unit="kg",
+            is_parent=True,
+            is_active=True
+        )
+        cut = Product.objects.create(
+            name="سینه کبابی مرغ جدید",
+            category=self.cat_chicken,
+            unit="kg",
+        )
+        # It should not have auto-assigned a parent due to ambiguity
+        self.assertIsNone(cut.parent)
+
+        # get_parent should safely return None when ambiguous, preventing HTTP 500s
+        self.assertIsNone(cut.get_parent())
+
     def test_product_form_category_and_parent_querysets(self):
         """ProductForm orders categories and restricts parent choices to parent products."""
         from products.forms import ProductForm
@@ -336,3 +362,63 @@ class ProductCatalogueCategoryIntegrityTestCase(TestCase):
         self.assertEqual(chicken_prods[0].id, self.parent_chicken.id)
         self.assertTrue(chicken_prods[0].is_parent)
 
+
+class Phase5CatalogueIntegrityTestCase(TestCase):
+    def setUp(self):
+        self.cat_chicken, _ = Category.objects.get_or_create(name="مرغ", slug="chicken", defaults={"display_order": 1})
+        self.parent_chicken = Product.objects.create(
+            name="مرغ کامل",
+            category=self.cat_chicken,
+            is_parent=True,
+            unit="kg"
+        )
+        self.child_fillet = Product.objects.create(
+            name="فیله",
+            category=self.cat_chicken,
+            parent=self.parent_chicken,
+            unit="kg"
+        )
+
+    def test_product_cannot_be_own_parent(self):
+        from django.core.exceptions import ValidationError
+        self.child_fillet.parent = self.child_fillet
+        with self.assertRaises(ValidationError) as cm:
+            self.child_fillet.clean()
+        self.assertIn('parent', cm.exception.error_dict)
+
+    def test_circular_parent_relationship_rejected(self):
+        from django.core.exceptions import ValidationError
+        # Attempt to make parent's parent the child
+        self.parent_chicken.parent = self.child_fillet
+        with self.assertRaises(ValidationError):
+            self.parent_chicken.clean()
+
+    def test_is_parent_cannot_have_parent(self):
+        from django.core.exceptions import ValidationError
+        # A parent cannot itself have a parent
+        p = Product(name="والد دوم", category=self.cat_chicken, is_parent=True, parent=self.parent_chicken)
+        with self.assertRaises(ValidationError):
+            p.clean()
+
+    def test_parent_must_be_actual_parent(self):
+        from django.core.exceptions import ValidationError
+        # A child cannot have another child as a parent
+        child_wings = Product(name="بال", category=self.cat_chicken, parent=self.child_fillet)
+        with self.assertRaises(ValidationError):
+            child_wings.clean()
+
+    def test_deterministic_ordering_in_list(self):
+        from django.urls import reverse
+        from django.test import Client
+        c = Client()
+        # Create products with same name and category to test 'id' tie-breaker
+        p1 = Product.objects.create(name="محصول مشابه", category=self.cat_chicken, parent=self.parent_chicken)
+        p2 = Product.objects.create(name="محصول مشابه", category=self.cat_chicken, parent=self.parent_chicken)
+
+        res = c.get(reverse('product_list'))
+        prods = list(res.context['products'])
+        # Find their index
+        i1 = prods.index(p1)
+        i2 = prods.index(p2)
+        # Should be ordered by ID ascending since they tie on other fields
+        self.assertLess(i1, i2)

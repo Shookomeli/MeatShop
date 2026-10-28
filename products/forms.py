@@ -86,3 +86,32 @@ class ProductForm(forms.ModelForm):
             return None
         return code
 
+    def clean(self):
+        cleaned_data = super().clean()
+        parent = cleaned_data.get('parent')
+        is_parent = cleaned_data.get('is_parent')
+
+        if parent:
+            if not parent.is_parent:
+                self.add_error('parent', 'کالای انتخاب شده به عنوان والد، خود یک کالای والد نیست.')
+            if is_parent:
+                self.add_error('parent', 'کالای والد نمی‌تواند خود دارای والد باشد.')
+
+            # Check for circular reference in form layer
+            if self.instance and self.instance.pk:
+                if parent.id == self.instance.id:
+                    self.add_error('parent', 'یک کالا نمی‌تواند والد خودش باشد.')
+
+                visited = set()
+                current_parent = parent
+                while current_parent is not None:
+                    if current_parent.id in visited:
+                        break
+                    visited.add(current_parent.id)
+                    if current_parent.id == self.instance.id:
+                        self.add_error('parent', 'ارجاع حلقوی در انتخاب والد مجاز نیست.')
+                        break
+                    current_parent = current_parent.parent
+
+        return cleaned_data
+

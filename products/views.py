@@ -36,7 +36,7 @@ def product_list_view(request):
             Q(code__icontains=persian_q)
         )
 
-    products = products.order_by('category__display_order', 'category__id', '-is_parent', 'name')
+    products = products.order_by('category__display_order', 'category__id', '-is_parent', 'name', 'id')
 
     categories = Category.objects.filter(is_active=True).order_by('display_order', 'id')
     total_count = Product.objects.count()
