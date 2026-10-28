@@ -75,7 +75,8 @@ class Product(models.Model):
     class Meta:
         verbose_name = "کالا"
         verbose_name_plural = "کالاها"
-        ordering = ['category', 'name']
+        # Deterministic sorting: Category -> Parent Products -> Child Products (Name -> ID fallback)
+        ordering = ['category__display_order', 'category__id', '-is_parent', 'name', 'id']
 
     def __str__(self):
         return self.name
