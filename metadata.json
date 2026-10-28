@@ -1,0 +1,8 @@
+{
+  "name": "Meat Shop Weighing & Invoice System",
+  "description": "Local chicken and meat shop weighing & invoice management system with KELI XK3118T1 scale integration, real-time tare/zero controls, dual Rial and Toman currency formatting, and Persian RTL interface.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+
+{% block title %}کاتالوگ و مدیریت اقلام کالا | فروشگاه گوشت{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 1.25rem;">
+    <!-- Title & Action Bar -->
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
+        <div>
+            <h1 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main);">فهرست و کاتالوگ اقلام کالا</h1>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.2rem;">
+                مجموع کاتالوگ: <strong>{{ total_count }}</strong> قلم | اقلام فعال: <strong>{{ active_count }}</strong> قلم
+            </p>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+            <a href="{% url 'product_create' %}" class="btn btn-primary">
+                + افزودن کالای جدید
+            </a>
+        </div>
+    </div>
+
+    <!-- Filter & Search Toolbar -->
+    <div style="background-color: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 6px; padding: 0.85rem 1rem; margin-bottom: 1rem;">
+        <form method="GET" action="{% url 'product_list' %}" style="display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;">
+            <!-- Search Query -->
+            <div style="flex: 1; min-width: 220px;">
+                <input type="text" name="q" value="{{ query }}" placeholder="جستجو بر اساس نام کالا یا کد..." class="form-input" style="padding: 0.45rem 0.75rem;">
+            </div>
+
+            <!-- Category Filter -->
+            <div style="min-width: 170px;">
+                <select name="category" class="form-select" style="padding: 0.45rem 0.75rem;">
+                    <option value="">همه دسته‌بندی‌ها</option>
+                    {% for cat in categories %}
+                    <option value="{{ cat.slug }}" {% if selected_category == cat.slug %}selected{% endif %}>
+                        {{ cat.name }} ({{ cat.products.count }})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Status Filter -->
+            <div style="min-width: 140px;">
+                <select name="status" class="form-select" style="padding: 0.45rem 0.75rem;">
+                    <option value="all" {% if selected_status == 'all' %}selected{% endif %}>همه وضعیت‌ها</option>
+                    <option value="active" {% if selected_status == 'active' %}selected{% endif %}>فقط اقلام فعال</option>
+                    <option value="inactive" {% if selected_status == 'inactive' %}selected{% endif %}>فقط اقلام غیرفعال</option>
+                </select>
+            </div>
+
+            <!-- Filter Buttons -->
+            <button type="submit" class="btn btn-secondary" style="padding: 0.45rem 0.9rem;">
+                اعمال فیلتر
+            </button>
+            {% if query or selected_category or selected_status != 'all' %}
+            <a href="{% url 'product_list' %}" class="btn btn-secondary" style="padding: 0.45rem 0.75rem; color: var(--danger);">
+                حذف فیلترها
+            </a>
+            {% endif %}
+        </form>
+    </div>
+
+    <!-- Category Tabs Navigation -->
+    <div style="display: flex; gap: 0.5rem; overflow-x: auto; padding-bottom: 0.5rem; margin-bottom: 1rem;">
+        <a href="{% url 'product_list' %}?status={{ selected_status }}{% if query %}&q={{ query }}{% endif %}" 
+           class="btn btn-sm {% if not selected_category %}btn-primary{% else %}btn-secondary{% endif %}">
+            همه ({{ total_count }})
+        </a>
+        {% for cat in categories %}
+        <a href="{% url 'product_list' %}?category={{ cat.slug }}&status={{ selected_status }}{% if query %}&q={{ query }}{% endif %}" 
+           class="btn btn-sm {% if selected_category == cat.slug %}btn-primary{% else %}btn-secondary{% endif %}">
+            {{ cat.name }} ({{ cat.products.count }})
+        </a>
+        {% endfor %}
+    </div>
+
+    <!-- Products Data Table -->
+    <div class="table-responsive">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th style="width: 50px;">ردیف</th>
+                    <th>نام قطعه / کالا</th>
+                    <th>دسته‌بندی</th>
+                    <th>کد کالا</th>
+                    <th>واحد سنجش</th>
+                    <th>قیمت پایه واحد</th>
+                    <th>وضعیت</th>
+                    <th style="text-align: center; width: 140px;">عملیات</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for product in products %}
+                <tr {% if not product.is_active %}style="opacity: 0.65; background-color: #f8fafc;"{% endif %}>
+                    <td class="tabular-nums" style="color: var(--text-muted); font-size: 0.8rem;">
+                        {{ forloop.counter }}
+                    </td>
+                    <td>
+                        <strong style="color: var(--text-main);">{{ product.name }}</strong>
+                        {% if product.is_parent %}
+                        <span style="background: #e0f2fe; color: #0369a1; font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; margin-right: 4px; font-weight: 600;">⭐ کالای اصلی والد</span>
+                        {% elif product.parent %}
+                        <span style="color: var(--text-muted); font-size: 0.75rem;">(والد: {{ product.parent.name }})</span>
+                        {% endif %}
+                        {% if product.description %}
+                        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">{{ product.description }}</div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span style="font-size: 0.85rem; color: var(--text-muted);">{{ product.category.name }}</span>
+                    </td>
+                    <td class="tabular-nums">
+                        {% if product.code %}
+                        <span style="background: var(--tag-bg); padding: 2px 6px; border-radius: 4px; font-size: 0.8rem;">{{ product.code }}</span>
+                        {% else %}
+                        <span style="color: #94a3b8; font-size: 0.8rem;">ثبت نشده</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {{ product.get_unit_display }}
+                    </td>
+                    <td class="tabular-nums">
+                        {% if product.price_per_unit_rial %}
+                        <strong>{{ product.price_display }}</strong>
+                        {% else %}
+                        <span style="color: #94a3b8; font-size: 0.85rem;">تعیین نشده</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if product.is_active %}
+                        <span class="status-badge status-active">فعال</span>
+                        {% else %}
+                        <span class="status-badge status-inactive">غیرفعال</span>
+                        {% endif %}
+                    </td>
+                    <td style="text-align: center; white-space: nowrap;">
+                        <a href="{% url 'product_edit' product.pk %}" class="btn btn-secondary btn-sm" style="margin-left: 4px;">
+                            ویرایش
+                        </a>
+                        <form method="POST" action="{% url 'product_toggle_active' product.pk %}" style="display: inline;">
+                            {% csrf_token %}
+                            {% if product.is_active %}
+                            <button type="submit" class="btn btn-danger btn-sm" title="غیرفعال‌سازی موقت کالا در فروشگاه">
+                                غیرفعال
+                            </button>
+                            {% else %}
+                            <button type="submit" class="btn btn-success btn-sm" title="فعال‌سازی مجدد کالا">
+                                فعال‌سازی
+                            </button>
+                            {% endif %}
+                        </form>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="8" style="text-align: center; padding: 2.5rem 1rem; color: var(--text-muted);">
+                        <p style="font-size: 1rem; margin-bottom: 0.5rem;">کالایی با مشخصات مورد نظر یافت نشد.</p>
+                        {% if query or selected_category %}
+                        <a href="{% url 'product_list' %}" class="btn btn-secondary btn-sm">مشاهده همه کالاها</a>
+                        {% else %}
+                        <a href="{% url 'product_create' %}" class="btn btn-primary btn-sm">+ ثبت اولین کالا</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

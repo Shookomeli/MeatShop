@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% load jalali_tags %}
+
+{% block title %}فهرست حواله‌های خروج و توزیع کالا | فروشگاه گوشت و مرغ{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
+        <div>
+            <h1 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main);">حواله‌های خروج و توزیع کالا</h1>
+            <p style="font-size: 0.85rem; color: var(--text-muted);">
+                سوابق کلیه حواله‌های خروجی انبار (تک‌قلمی و چندقلمی) به همراه جزئیات اوزان باسکول، پارسنگ و صدور فاکتور
+            </p>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+            <a href="{% url 'invoice_from_source' %}?tab=sales" class="btn btn-secondary">
+                📄 صدور فاکتور فروش از حواله‌ها
+            </a>
+            <a href="{% url 'issue_create' %}" class="btn btn-primary">
+                + ثبت حواله خروج جدید
+            </a>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>شماره حواله</th>
+                    <th>تاریخ و ساعت خروج</th>
+                    <th>اقلام کالای خروجی</th>
+                    <th>تحویل‌گیرنده / خریدار</th>
+                    <th>راننده / خودرو</th>
+                    <th>علت خروج</th>
+                    <th>مجموع وزن خالص</th>
+                    <th>مبلغ کل</th>
+                    <th>وضعیت فاکتور</th>
+                    <th style="text-align: center; width: 110px;">عملیات</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for iss in issues %}
+                <tr>
+                    <td>
+                        <strong style="color: #991b1b;" class="tabular-nums">{{ iss.document_number }}</strong>
+                    </td>
+                    <td class="tabular-nums" style="font-size: 0.85rem; color: var(--text-muted); white-space: nowrap;">
+                        {{ iss.date_time|jdatetime }}
+                    </td>
+                    <td>
+                        {% if iss.items.exists %}
+                            {% with first_item=iss.items.first count=iss.items.count %}
+                                <strong>{{ first_item.product.name }}</strong>
+                                {% if count > 1 %}
+                                <span style="font-size: 0.75rem; color: #1e3a8a; background: #e0f2fe; padding: 0.15rem 0.4rem; border-radius: 4px; margin-right: 0.35rem;">
+                                    + {{ count|add:"-1" }} قلم دیگر
+                                </span>
+                                {% endif %}
+                            {% endwith %}
+                        {% elif iss.product %}
+                            <strong>{{ iss.product.name }}</strong>
+                            <div style="font-size: 0.75rem; color: var(--text-muted);">{{ iss.product.category.name }}</div>
+                        {% else %}
+                            <span style="color: var(--text-muted); font-size: 0.85rem;">اقلام خروجی</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <strong>{{ iss.recipient_name }}</strong>
+                        {% if iss.destination_address %}
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">{{ iss.destination_address }}</div>
+                        {% endif %}
+                    </td>
+                    <td style="font-size: 0.85rem;">{{ iss.driver_name|default:"—" }}</td>
+                    <td>
+                        <span class="status-badge status-inactive">{{ iss.get_issue_reason_display }}</span>
+                    </td>
+                    <td class="tabular-nums" style="color: #15803d; font-weight: 700;">
+                        {{ iss.aggregate_net_weight|format_weight_kg }}
+                    </td>
+                    <td class="tabular-nums">
+                        {% if iss.aggregate_total_amount %}
+                            {{ iss.aggregate_total_amount|toman_display }}
+                        {% else %}
+                            <span style="color: #94a3b8; font-size: 0.85rem;">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if iss.is_invoiced %}
+                            <a href="{% url 'invoice_detail' iss.invoice.pk %}" class="status-badge status-active" style="font-size: 0.75rem; text-decoration: none;">
+                                فاکتور شده
+                            </a>
+                        {% else %}
+                            <span class="status-badge status-inactive" style="font-size: 0.75rem;">
+                                فاکتور نشده
+                            </span>
+                        {% endif %}
+                    </td>
+                    <td style="text-align: center;">
+                        <a href="{% url 'issue_detail' iss.pk %}" class="btn btn-secondary btn-sm" title="مشاهده و چاپ حواله خروج">
+                            🔍 مشاهده / چاپ
+                        </a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="10" style="text-align: center; padding: 2.5rem; color: var(--text-muted);">
+                        تاکنون حواله خروجی ثبت نشده است. 
+                        <a href="{% url 'issue_create' %}" class="btn btn-primary btn-sm" style="margin-right: 0.5rem;">+ ثبت اولین حواله خروج</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

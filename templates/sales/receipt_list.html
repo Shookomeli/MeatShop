@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% load jalali_tags %}
+
+{% block title %}فهرست رسیدهای ورود کالا | فروشگاه گوشت و مرغ{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
+        <div>
+            <h1 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main);">رسیدهای ورود کالا به انبار</h1>
+            <p style="font-size: 0.85rem; color: var(--text-muted);">
+                فهرست کلیه بارهای ورودی ثبت‌شده به انبار به همراه جزئیات اوزان باسکول، پارسنگ و چاپ رسید رسمی
+            </p>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+            <a href="{% url 'invoice_from_source' %}?tab=purchase" class="btn btn-secondary">
+                📄 صدور فاکتور خرید از رسیدها
+            </a>
+            <a href="{% url 'receipt_create' %}" class="btn btn-primary">
+                + ثبت رسید ورود جدید
+            </a>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>شماره سند</th>
+                    <th>تاریخ و ساعت ورود</th>
+                    <th>نام کالا</th>
+                    <th>تأمین‌کننده / مبدأ</th>
+                    <th>وزن ناخالص</th>
+                    <th>پارسنگ ظروف</th>
+                    <th>وزن خالص ورودی</th>
+                    <th>کاربر ثبت‌کننده</th>
+                    <th>وضعیت فاکتور</th>
+                    <th style="text-align: center; width: 110px;">عملیات</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in receipts %}
+                <tr>
+                    <td>
+                        <strong style="color: #1e3a8a;" class="tabular-nums">{{ r.document_number }}</strong>
+                        {% if r.supplier_document_ref %}
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">بارنامه: {{ r.supplier_document_ref }}</div>
+                        {% endif %}
+                    </td>
+                    <td class="tabular-nums" style="font-size: 0.85rem; color: var(--text-muted); white-space: nowrap;">
+                        {{ r.date_time|jdatetime }}
+                    </td>
+                    <td>
+                        <strong>{{ r.primary_product_name }}</strong>
+                        {% if r.items.count > 1 %}
+                        <div style="font-size: 0.75rem; color: #1e3a8a; font-weight: 600;">رسید چندقلمی ({{ r.items.count }} قلم کالا)</div>
+                        {% elif r.product %}
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">{{ r.product.category.name }}</div>
+                        {% endif %}
+                    </td>
+                    <td>{{ r.supplier_name }}</td>
+                    <td class="tabular-nums">{{ r.aggregate_gross_weight|format_weight_kg }}</td>
+                    <td class="tabular-nums" style="color: #b91c1c;">-{{ r.aggregate_tare_weight|format_weight_kg }}</td>
+                    <td class="tabular-nums" style="color: #15803d; font-weight: 700;">
+                        {{ r.aggregate_net_weight|format_weight_kg }}
+                    </td>
+                    <td style="font-size: 0.85rem; color: var(--text-muted);">
+                        {{ r.operator.username|default:"سیستم" }}
+                    </td>
+                    <td>
+                        {% if r.is_invoiced %}
+                            <a href="{% url 'invoice_detail' r.invoice.pk %}" class="status-badge status-active" style="font-size: 0.75rem; text-decoration: none;">
+                                فاکتور شده
+                            </a>
+                        {% else %}
+                            <span class="status-badge status-inactive" style="font-size: 0.75rem;">
+                                فاکتور نشده
+                            </span>
+                        {% endif %}
+                    </td>
+                    <td style="text-align: center;">
+                        <a href="{% url 'receipt_detail' r.pk %}" class="btn btn-secondary btn-sm" title="مشاهده و چاپ رسید ورود">
+                            🔍 مشاهده / چاپ
+                        </a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="10" style="text-align: center; padding: 2.5rem; color: var(--text-muted);">
+                        تاکنون رسیدی ثبت نشده است. 
+                        <a href="{% url 'receipt_create' %}" class="btn btn-primary btn-sm" style="margin-right: 0.5rem;">+ ثبت اولین رسید ورود</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    font-family: 'Vazirmatn', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  }
+
+  body {
+    direction: rtl;
+    text-align: right;
+  }
+}
+
+.font-mono-digits {
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-feature-settings: 'tnum';
+  font-variant-numeric: tabular-nums;
+}
+
+/* Digital Scale LED Segment Font Styling */
+.scale-led-display {
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 2px;
+  text-shadow: 0 0 12px rgba(34, 197, 94, 0.65);
+}
+
+.scale-led-display-red {
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 2px;
+  text-shadow: 0 0 12px rgba(239, 68, 68, 0.65);
+}
+
+/* Print specific styles standardized to A5 portrait */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #printable-receipt, #printable-receipt * {
+    visibility: visible;
+  }
+  #printable-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100% !important;
+    max-width: 148mm !important;
+    padding: 6mm !important;
+    background: white !important;
+    color: black !important;
+    font-size: 11px !important;
+    direction: rtl !important;
+  }
+  @page {
+    size: A5 portrait;
+    margin: 8mm;
+  }
+}

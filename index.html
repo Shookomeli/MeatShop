@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="fa">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🥩</text></svg>" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Meat Shop Weighing &amp; Invoice System - سیستم توزین و فاکتور فروشگاه گوشت</title>
+    <meta name="description" content="Local chicken and meat shop weighing &amp; invoice management system with KELI XK3118T1 scale integration, real-time tare/zero controls, dual Rial and Toman currency formatting, and Persian RTL interface." />
+    <meta property="og:title" content="Meat Shop Weighing &amp; Invoice System - سیستم توزین و فاکتور فروشگاه گوشت" />
+    <meta property="og:description" content="Local chicken and meat shop weighing &amp; invoice management system with KELI XK3118T1 scale integration, real-time tare/zero controls, dual Rial and Toman currency formatting, and Persian RTL interface." />
+    <!-- Persian Web Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-stone-900 text-stone-100 font-sans antialiased min-h-screen selection:bg-rose-700 selection:text-white">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      document.addEventListener('wheel', function(e) {
+        if (document.activeElement && (document.activeElement.type === 'number' || document.activeElement.classList.contains('weight-input'))) {
+          document.activeElement.blur();
+        }
+      }, { passive: true });
+    </script>
+  </body>
+</html>

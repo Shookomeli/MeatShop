@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block title %}گزارش ممیزی و موازنه موجودی انبار | فروشگاه گوشت و مرغ{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 2rem;">
+    <!-- Header -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
+        <div>
+            <a href="{% url 'reports_hub' %}" style="color: var(--text-muted); font-size: 0.85rem; text-decoration: none;">
+                ← بازگشت به مرکز گزارش‌ها
+            </a>
+            <h1 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main); margin-top: 0.35rem;">
+                گزارش جامع ممیزی و موازنه موجودی انبار
+            </h1>
+        </div>
+        <div>
+            <a href="{% url 'export_inventory_csv' %}" class="btn btn-secondary">
+                📥 دانلود فایل اکسل موجودی (CSV)
+            </a>
+        </div>
+    </div>
+
+    <!-- Category Distribution Chips -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.75rem; margin-bottom: 1.25rem;">
+        {% for cat_name, weight in category_summary.items %}
+        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 6px; padding: 0.75rem; text-align: center;">
+            <div style="font-size: 0.8rem; color: var(--text-muted);">{{ cat_name }}</div>
+            <div style="font-size: 1.15rem; font-weight: 700; color: #1e3a8a; margin-top: 0.2rem;" class="tabular-nums">
+                {{ weight|floatformat:3 }} kg
+            </div>
+        </div>
+        {% endfor %}
+        <div style="background: #eff6ff; border: 2px solid #bfdbfe; border-radius: 6px; padding: 0.75rem; text-align: center;">
+            <div style="font-size: 0.8rem; color: #1e40af; font-weight: 600;">مجموع کل موجودی</div>
+            <div style="font-size: 1.25rem; font-weight: 800; color: #1e3a8a; margin-top: 0.2rem;" class="tabular-nums">
+                {{ total_inventory_kg|floatformat:3 }} kg
+            </div>
+        </div>
+    </div>
+
+    <!-- Filter Form -->
+    <div style="background-color: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1.25rem;">
+        <form method="GET" action="{% url 'report_inventory' %}" style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+            <div style="min-width: 180px;">
+                <select name="category" class="form-select" style="padding: 0.45rem 0.65rem;">
+                    <option value="">همه دسته‌بندی‌ها</option>
+                    {% for cat in categories %}
+                    <option value="{{ cat.slug }}" {% if selected_category == cat.slug %}selected{% endif %}>{{ cat.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div style="min-width: 160px;">
+                <select name="status" class="form-select" style="padding: 0.45rem 0.65rem;">
+                    <option value="all" {% if selected_status == 'all' %}selected{% endif %}>همه اقلام</option>
+                    <option value="in_stock" {% if selected_status == 'in_stock' %}selected{% endif %}>فقط اقلام موجود (بزرگتر از صفر)</option>
+                    <option value="out_of_stock" {% if selected_status == 'out_of_stock' %}selected{% endif %}>فقط اقلام صفر / ناموجود</option>
+                </select>
+            </div>
+
+            <button type="submit" class="btn btn-secondary">فیلتر</button>
+            {% if selected_category or selected_status != 'all' %}
+            <a href="{% url 'report_inventory' %}" class="btn btn-secondary" style="color: var(--danger);">حذف فیلتر</a>
+            {% endif %}
+        </form>
+    </div>
+
+    <!-- Table of Inventory Items -->
+    <div class="table-responsive">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th style="width: 45px;">ردیف</th>
+                    <th>نام قطعه / کالا</th>
+                    <th>دسته‌بندی</th>
+                    <th>کد کالا</th>
+                    <th>واحد</th>
+                    <th>موجودی خالص انبار</th>
+                    <th>وضعیت</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in rows %}
+                <tr>
+                    <td class="tabular-nums" style="font-size: 0.8rem; color: var(--text-muted);">
+                        {{ forloop.counter }}
+                    </td>
+                    <td><strong>{{ item.product.name }}</strong></td>
+                    <td style="font-size: 0.85rem; color: var(--text-muted);">{{ item.product.category.name }}</td>
+                    <td class="tabular-nums">
+                        {% if item.product.code %}
+                        <span style="background: var(--tag-bg); padding: 2px 6px; border-radius: 4px; font-size: 0.8rem;">{{ item.product.code }}</span>
+                        {% else %}
+                        <span style="color: #94a3b8; font-size: 0.8rem;">—</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ item.product.get_unit_display }}</td>
+                    <td class="tabular-nums" style="font-weight: 700; color: {% if item.balance_kg > 0 %}#15803d{% else %}#64748b{% endif %};">
+                        {{ item.balance_kg|floatformat:3 }} kg
+                    </td>
+                    <td>
+                        {% if item.balance_kg > 0 %}
+                        <span class="status-badge status-active">موجود</span>
+                        {% else %}
+                        <span class="status-badge status-inactive">ناموجود (صفر)</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="7" style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                        رکوردی با مشخصات انتخاب‌شده یافت نشد.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

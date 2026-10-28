@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% load jalali_tags %}
+
+{% block title %}سند تبدیل و فرآوری {{ record.document_number }} | فروشگاه گوشت و مرغ{% endblock %}
+
+{% block content %}
+<div style="max-width: 900px; margin: 0 auto;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+        <div>
+            <a href="{% url 'processing_list' %}" style="color: var(--text-muted); font-size: 0.85rem; text-decoration: none;">
+                ← بازگشت به فهرست اسناد تبدیل
+            </a>
+            <h1 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main); margin-top: 0.35rem;">
+                جزئیات سند تبدیل و فرآوری: {{ record.document_number }}
+            </h1>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+            <button onclick="window.print()" class="btn btn-secondary btn-sm">🖨️ چاپ سند</button>
+            <a href="{% url 'processing_create' %}" class="btn btn-primary btn-sm">+ تبدیل جدید</a>
+        </div>
+    </div>
+
+    <!-- Summary Metrics Card -->
+    <div style="background: var(--bg-surface); border: 2px solid var(--border-color); border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.75rem;">
+            <div>
+                <span style="font-size: 0.85rem; color: var(--text-muted);">تاریخ و ساعت اجرا:</span>
+                <strong class="tabular-nums" style="margin-right: 0.35rem;">{{ record.date_time|jdatetime }}</strong>
+            </div>
+            <div>
+                <span style="font-size: 0.85rem; color: var(--text-muted);">کاربر مجری:</span>
+                <span style="margin-right: 0.35rem;">{{ record.operator.username|default:"سیستم" }}</span>
+            </div>
+            <div>
+                <span style="font-size: 0.85rem; color: var(--text-muted);">وضعیت تراز:</span>
+                {% if record.reconciliation_status == 'RECONCILED' %}
+                <span class="status-badge status-active">تراز کامل و متوازن</span>
+                {% elif record.reconciliation_status == 'UNEXPLAINED_LOSS' %}
+                <span class="status-badge status-inactive" style="background: #fef3c7; color: #92400e;">کسری / افت تبیین‌نشده</span>
+                {% else %}
+                <span class="status-badge status-inactive" style="background: #fee2e2; color: #991b1b;">مازاد غیرعادی خروجی</span>
+                {% endif %}
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1.2fr; gap: 1rem; text-align: center;">
+            <div style="background: #f8fafc; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border-color);">
+                <div style="font-size: 0.8rem; color: var(--text-muted);">مجموع ورودی مصرفی</div>
+                <div style="font-size: 1.25rem; font-weight: 700; color: #1e293b;" class="tabular-nums">{{ record.total_input_weight_kg|floatformat:3 }} kg</div>
+            </div>
+
+            <div style="background: #f8fafc; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border-color);">
+                <div style="font-size: 0.8rem; color: var(--text-muted);">مجموع خروجی استحصالی</div>
+                <div style="font-size: 1.25rem; font-weight: 700; color: #15803d;" class="tabular-nums">{{ record.total_output_weight_kg|floatformat:3 }} kg</div>
+            </div>
+
+            <div style="background: #f8fafc; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border-color);">
+                <div style="font-size: 0.8rem; color: var(--text-muted);">مغایرت / افت کل</div>
+                <div style="font-size: 1.25rem; font-weight: 700; color: #b91c1c;" class="tabular-nums">{{ record.unexplained_variance_kg|floatformat:3 }} kg</div>
+            </div>
+
+            <div style="background: #eff6ff; padding: 0.75rem; border-radius: 6px; border: 1px solid #93c5fd;">
+                <div style="font-size: 0.8rem; color: #1e40af;">درصد راندمان (Yield)</div>
+                <div style="font-size: 1.4rem; font-weight: 800; color: #1e3a8a;" class="tabular-nums">{{ record.yield_percentage|floatformat:1 }} %</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tables Grid: Inputs and Outputs -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.5rem;">
+        <!-- Input Lines -->
+        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem;">
+            <h2 style="font-size: 1rem; font-weight: 700; margin-bottom: 0.75rem; color: var(--text-main);">
+                📥 مواد اولیه مصرف‌شده (کسر از انبار)
+            </h2>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>نام کالا</th>
+                            <th>دسته‌بندی</th>
+                            <th style="width: 110px; text-align: left;">وزن خالص</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for line in record.input_lines.all %}
+                        <tr>
+                            <td><strong>{{ line.product.name }}</strong></td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">{{ line.product.category.name }}</td>
+                            <td class="tabular-nums" style="text-align: left; font-weight: 700; color: #b91c1c;">
+                                -{{ line.net_weight_kg|floatformat:3 }} kg
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Output Lines -->
+        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem;">
+            <h2 style="font-size: 1rem; font-weight: 700; margin-bottom: 0.75rem; color: var(--text-main);">
+                📤 قطعات حاصله و ضایعات (افزایش به انبار)
+            </h2>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>نام محصول</th>
+                            <th>نوع</th>
+                            <th style="width: 110px; text-align: left;">وزن خالص</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for line in record.output_lines.all %}
+                        <tr>
+                            <td><strong>{{ line.product.name }}</strong></td>
+                            <td>
+                                {% if line.is_byproduct_or_waste %}
+                                <span class="status-badge status-inactive" style="background: #f1f5f9; color: #64748b;">ضایعات/ضمیمه</span>
+                                {% else %}
+                                <span class="status-badge status-active">برش اصلی</span>
+                                {% endif %}
+                            </td>
+                            <td class="tabular-nums" style="text-align: left; font-weight: 700; color: #15803d;">
+                                +{{ line.net_weight_kg|floatformat:3 }} kg
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    {% if record.remarks %}
+    <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 2rem;">
+        <h3 style="font-size: 0.9rem; font-weight: 700; color: var(--text-muted); margin-bottom: 0.35rem;">توضیحات و گزارش:</h3>
+        <p style="font-size: 0.9rem; color: var(--text-main);">{{ record.remarks }}</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

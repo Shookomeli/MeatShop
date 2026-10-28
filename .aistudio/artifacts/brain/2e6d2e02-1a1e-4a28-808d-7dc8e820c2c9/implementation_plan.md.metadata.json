@@ -1,0 +1,6 @@
+{
+  "summary":  "Refined implementation plan for MeatShop addressing:\n1. Legacy receipt migration: distinguishing incomplete historical receipts from valid zero-weight records, preserving skipped records in views/reports, zero data fabrication.\n2. Authoritative tare totals: calculating aggregate tare weight from the sum of item-level total_tare_weight_kg values when items exist, with consistency tests.\n3. Robust idempotency handling: DB-lookup verification rather than string parsing of IntegrityError, re-raising unrelated integrity failures.\n4. Independent product IDs per line: isolated product IDs per dynamic line across receipts, issues, and invoices.\n5. Final acceptance criteria: strict DB isolation, actual command verification, and zero duplicate StockMovement ledger entries.",
+  "updatedAt":  "2026-10-24T12:30:37.619079670Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

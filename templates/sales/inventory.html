@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% load jalali_tags %}
+
+{% block title %}موجودی انبار و کاردکس کالاها | فروشگاه گوشت و مرغ{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 1.5rem;">
+    <!-- Header & Summary Card -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 1rem;">
+        <div>
+            <h1 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main);">موجودی لحظه‌ای انبار و کاردکس</h1>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.2rem;">
+                محاسبه خودکار بر مبنای تفاضل وزنی ورود و خروج (دفتر کل گردش انبار)
+            </p>
+        </div>
+        <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 0.6rem 1.2rem; display: flex; align-items: center; gap: 0.75rem;">
+            <span style="font-size: 0.9rem; color: #1e40af;">مجموع وزن خالص موجودی انبار:</span>
+            <strong style="font-size: 1.25rem; color: #1e3a8a;" class="tabular-nums">{{ total_inventory_weight|floatformat:3 }} کیلوگرم</strong>
+        </div>
+    </div>
+
+    <!-- Search & Filter Bar -->
+    <div style="background-color: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 1rem;">
+        <form method="GET" action="{% url 'inventory_overview' %}" style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 240px;">
+                <input type="text" name="q" value="{{ query }}" placeholder="جستجو بر اساس نام کالا یا کد..." class="form-input" style="padding: 0.45rem 0.75rem;">
+            </div>
+            <div style="min-width: 180px;">
+                <select name="category" class="form-select" style="padding: 0.45rem 0.75rem;">
+                    <option value="">همه دسته‌بندی‌ها</option>
+                    {% for cat in categories %}
+                    <option value="{{ cat.slug }}" {% if selected_category == cat.slug %}selected{% endif %}>
+                        {{ cat.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="btn btn-secondary">فیلتر</button>
+            {% if query or selected_category %}
+            <a href="{% url 'inventory_overview' %}" class="btn btn-secondary" style="color: var(--danger);">حذف فیلتر</a>
+            {% endif %}
+        </form>
+    </div>
+
+    <!-- Category Tabs -->
+    <div style="display: flex; gap: 0.5rem; overflow-x: auto; padding-bottom: 0.5rem; margin-bottom: 1rem;">
+        <a href="{% url 'inventory_overview' %}{% if query %}?q={{ query }}{% endif %}" 
+           class="btn btn-sm {% if not selected_category %}btn-primary{% else %}btn-secondary{% endif %}">
+            همه دسته‌ها
+        </a>
+        {% for cat in categories %}
+        <a href="{% url 'inventory_overview' %}?category={{ cat.slug }}{% if query %}&q={{ query }}{% endif %}" 
+           class="btn btn-sm {% if selected_category == cat.slug %}btn-primary{% else %}btn-secondary{% endif %}">
+            {{ cat.name }}
+        </a>
+        {% endfor %}
+    </div>
+
+    <!-- Current Stock Table -->
+    <div class="table-responsive" style="margin-bottom: 2rem;">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th style="width: 45px;">ردیف</th>
+                    <th>نام قطعه / کالا</th>
+                    <th>دسته‌بندی</th>
+                    <th>کد کالا</th>
+                    <th>واحد</th>
+                    <th>موجودی فعلی انبار</th>
+                    <th>وضعیت انبار</th>
+                    <th style="text-align: center; width: 160px;">عملیات سریع</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in stock_items %}
+                <tr>
+                    <td class="tabular-nums" style="color: var(--text-muted); font-size: 0.8rem;">
+                        {{ forloop.counter }}
+                    </td>
+                    <td>
+                        <strong>{{ item.product.name }}</strong>
+                        {% if item.product.is_parent %}
+                        <span style="background: #e0f2fe; color: #0369a1; font-size: 0.72rem; padding: 2px 6px; border-radius: 4px; margin-right: 4px; font-weight: 600;">⭐ کالای والد</span>
+                        {% elif item.product.parent %}
+                        <span style="color: var(--text-muted); font-size: 0.75rem;">(والد: {{ item.product.parent.name }})</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span style="font-size: 0.85rem; color: var(--text-muted);">{{ item.product.category.name }}</span>
+                    </td>
+                    <td class="tabular-nums">
+                        {% if item.product.code %}
+                        <span style="background: var(--tag-bg); padding: 2px 6px; border-radius: 4px; font-size: 0.8rem;">{{ item.product.code }}</span>
+                        {% else %}
+                        <span style="color: #94a3b8; font-size: 0.8rem;">—</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ item.product.get_unit_display }}</td>
+                    <td class="tabular-nums">
+                        {% if item.product.is_parent %}
+                        <strong style="font-size: 1rem; color: {% if item.balance_kg > 0 %}#15803d{% else %}#64748b{% endif %};">
+                            {{ item.balance_kg|floatformat:3 }} کیلوگرم
+                        </strong>
+                        <div style="font-size: 0.75rem; color: #0369a1; margin-top: 2px;">
+                            (موجودی لاشه اصلی انبار)
+                        </div>
+                        {% else %}
+                        <div style="font-size: 0.95rem; font-weight: 700; color: {% if item.balance_kg > 0 %}#15803d{% else %}#64748b{% endif %};">
+                            مستقل: {{ item.balance_kg|floatformat:3 }} kg
+                        </div>
+                        {% if item.available_kg > item.balance_kg %}
+                        <div style="font-size: 0.75rem; color: #1e40af; margin-top: 2px;">
+                            (تخصیص‌پذیر از والد: {{ item.available_kg|floatformat:3 }} kg)
+                        </div>
+                        {% else %}
+                        <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 2px;">
+                            (سهمیه مازاد والد: ۰)
+                        </div>
+                        {% endif %}
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if item.balance_kg > 0 %}
+                        <span class="status-badge status-active">موجود در انبار</span>
+                        {% elif item.available_kg > 0 %}
+                        <span class="status-badge" style="background-color: #dbeafe; color: #1e40af;">قابل صدور از والد</span>
+                        {% else %}
+                        <span class="status-badge status-inactive">عدم موجودی (صفر)</span>
+                        {% endif %}
+                    </td>
+                    <td style="text-align: center; white-space: nowrap;">
+                        <a href="{% url 'receipt_create' %}?product={{ item.product.pk }}" class="btn btn-secondary btn-sm" title="ثبت ورود برای این کالا">
+                            + ورود
+                        </a>
+                        <a href="{% url 'issue_create' %}?product={{ item.product.pk }}" class="btn btn-secondary btn-sm" title="ثبت حواله خروج">
+                            - خروج
+                        </a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="8" style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                        کالایی یافت نشد.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Recent Movements Ledger (کاردکس اخیر) -->
+    <div style="background-color: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem;">
+        <h2 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 0.75rem; color: var(--text-main);">
+            📜 دفتر کل گردش انبار (۲۵ تراکنش اخیر کاردکس)
+        </h2>
+        <div class="table-responsive">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>زمان ثبت</th>
+                        <th>نام کالا</th>
+                        <th>نوع عملیات</th>
+                        <th>تغییر وزن خالص</th>
+                        <th>شماره سند مرجع</th>
+                        <th>کاربر ثبت‌کننده</th>
+                        <th>شرح و ملاحظات</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in recent_movements %}
+                    <tr>
+                        <td class="tabular-nums" style="font-size: 0.8rem; color: var(--text-muted); white-space: nowrap;">
+                            {{ m.timestamp|jdatetime }}
+                        </td>
+                        <td><strong>{{ m.product.name }}</strong></td>
+                        <td>
+                            {% if m.direction == 'IN' %}
+                            <span class="status-badge status-active">{{ m.get_movement_type_display }}</span>
+                            {% else %}
+                            <span class="status-badge status-inactive" style="background: #fee2e2; color: #991b1b;">{{ m.get_movement_type_display }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="tabular-nums" style="direction: ltr; text-align: right; font-weight: 700; color: {% if m.direction == 'IN' %}#15803d{% else %}#b91c1c{% endif %};">
+                            {% if m.direction == 'IN' %}+{% else %}-{% endif %}{{ m.net_weight_kg|floatformat:3 }} kg
+                        </td>
+                        <td>
+                            <code style="background: var(--tag-bg); padding: 2px 6px; border-radius: 4px;">{{ m.reference_document_number }}</code>
+                        </td>
+                        <td style="font-size: 0.85rem; color: var(--text-muted);">
+                            {{ m.operator.username|default:"سیستم" }}
+                        </td>
+                        <td style="font-size: 0.85rem; color: var(--text-muted);">
+                            {{ m.remarks|default:"—" }}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" style="text-align: center; padding: 1.5rem; color: var(--text-muted);">
+                            هنوز گردش انباری ثبت نشده است. با ثبت رسید یا حواله، سوابق به صورت خودکار در این جدول درج می‌گردند.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

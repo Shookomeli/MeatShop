@@ -1,0 +1,308 @@
+{% extends "base.html" %}
+
+{% block title %}ثبت عملیات تبدیل و فرآوری لاشه | فروشگاه گوشت و مرغ{% endblock %}
+
+{% block content %}
+<div style="max-width: 950px; margin: 0 auto;">
+    <div style="margin-bottom: 1.25rem;">
+        <a href="{% url 'processing_list' %}" style="color: var(--text-muted); font-size: 0.85rem; text-decoration: none;">
+            ← بازگشت به فهرست اسناد تبدیل و فرآوری
+        </a>
+        <h1 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main); margin-top: 0.35rem;">
+            ثبت عملیات تبدیل، خردایش و قطعه‌بندی گوشت
+        </h1>
+        <p style="font-size: 0.85rem; color: var(--text-muted);">
+            کسر خودکار لاشه یا مرغ کامل از انبار، ثبت برش‌های استحصالی و ضایعات، و محاسبه لحظه‌ای درصد راندمان و افت.
+        </p>
+    </div>
+
+    <form method="POST" id="processing-form">
+        {% csrf_token %}
+
+        <!-- Input Materials Section -->
+        <div style="background-color: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; margin-bottom: 1.25rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <div>
+                    <h2 style="font-size: 1.05rem; font-weight: 700; color: var(--text-main);">
+                        ۱. مواد اولیه مصرفی (لاشه، مرغ کامل یا ورودی‌ها)
+                    </h2>
+                    <p style="font-size: 0.8rem; color: var(--text-muted);">
+                        کالاهایی که مصرف می‌شوند و وزن خالص آنها از موجودی انبار کسر خواهد شد.
+                    </p>
+                </div>
+                <button type="button" id="btn-add-input-row" class="btn btn-secondary btn-sm">
+                    + افزودن ماده ورودی
+                </button>
+            </div>
+
+            <div class="table-responsive">
+                <table class="data-table" id="input-table">
+                    <thead>
+                        <tr>
+                            <th>نام کالا (مشاهده موجودی انبار)</th>
+                            <th style="width: 180px;">وزن مصرفی (کیلوگرم)</th>
+                            <th style="width: 60px; text-align: center;">حذف</th>
+                        </tr>
+                    </thead>
+                    <tbody id="input-rows-body">
+                        <tr class="input-row">
+                            <td>
+                                <select name="input_product_id" class="form-select input-prod-select" required>
+                                    <option value="">-- انتخاب ماده اولیه --</option>
+                                    {% for item in products_with_stock %}
+                                    <option value="{{ item.product.id }}" data-balance="{{ item.balance_kg|floatformat:3 }}">
+                                        {{ item.product.name }} ({{ item.product.category.name }}) — موجودی: {{ item.balance_kg|floatformat:3 }} kg
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td>
+                                <input type="number" step="0.001" min="0.001" name="input_weight_kg" class="form-input input-weight" placeholder="0.000" dir="ltr" required>
+                            </td>
+                            <td style="text-align: center;">
+                                <button type="button" class="btn btn-danger btn-sm btn-remove-row">×</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Output Cuts & By-products Section -->
+        <div style="background-color: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; margin-bottom: 1.25rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <div>
+                    <h2 style="font-size: 1.05rem; font-weight: 700; color: var(--text-main);">
+                        ۲. محصولات و برش‌های حاصله (خروجی‌ها و ضایعات)
+                    </h2>
+                    <p style="font-size: 0.8rem; color: var(--text-muted);">
+                        قطعات قابل فروش، اسکلت، چربی، پوست و استخوان حاصل از قطعه‌بندی که به انبار اضافه می‌شوند.
+                    </p>
+                </div>
+                <button type="button" id="btn-add-output-row" class="btn btn-secondary btn-sm">
+                    + افزودن محصول خروجی
+                </button>
+            </div>
+
+            <div class="table-responsive">
+                <table class="data-table" id="output-table">
+                    <thead>
+                        <tr>
+                            <th>نام محصول یا قطعه خروجی</th>
+                            <th style="width: 180px;">وزن خالص حاصله (kg)</th>
+                            <th style="width: 180px; text-align: center;">نوع ردیف</th>
+                            <th style="width: 60px; text-align: center;">حذف</th>
+                        </tr>
+                    </thead>
+                    <tbody id="output-rows-body">
+                        <tr class="output-row">
+                            <td>
+                                <select name="output_product_id" class="form-select output-prod-select" required>
+                                    <option value="">-- انتخاب قطعه خروجی --</option>
+                                    {% for p in products %}
+                                    <option value="{{ p.id }}">{{ p.name }} ({{ p.category.name }})</option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td>
+                                <input type="number" step="0.001" min="0.001" name="output_weight_kg" class="form-input output-weight" placeholder="0.000" dir="ltr" required>
+                            </td>
+                            <td style="text-align: center;">
+                                <label style="font-size: 0.85rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.35rem;">
+                                    <input type="checkbox" name="is_waste" value="0" class="waste-checkbox">
+                                    ضایعات / افت
+                                </label>
+                            </td>
+                            <td style="text-align: center;">
+                                <button type="button" class="btn btn-danger btn-sm btn-remove-row">×</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Live Yield & Reconciliation Card -->
+        <div style="background: #f1f5f9; border: 2px solid #cbd5e1; border-radius: 8px; padding: 1.25rem; margin-bottom: 1.25rem;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1.2fr; gap: 1rem; text-align: center; align-items: center;">
+                <div style="background: #ffffff; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 0.8rem; color: var(--text-muted);">مجموع وزن ورودی</div>
+                    <div id="stat-input-weight" style="font-size: 1.25rem; font-weight: 700; color: #1e293b;" class="tabular-nums">0.000 kg</div>
+                </div>
+
+                <div style="background: #ffffff; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 0.8rem; color: var(--text-muted);">مجموع وزن خروجی</div>
+                    <div id="stat-output-weight" style="font-size: 1.25rem; font-weight: 700; color: #15803d;" class="tabular-nums">0.000 kg</div>
+                </div>
+
+                <div style="background: #ffffff; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 0.8rem; color: var(--text-muted);">مغایرت / افت وزن</div>
+                    <div id="stat-variance-weight" style="font-size: 1.25rem; font-weight: 700; color: #b91c1c;" class="tabular-nums">0.000 kg</div>
+                </div>
+
+                <div style="background: #ffffff; padding: 0.75rem; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 0.8rem; color: var(--text-muted);">درصد راندمان (Yield)</div>
+                    <div id="stat-yield-pct" style="font-size: 1.4rem; font-weight: 800; color: #1e3a8a;" class="tabular-nums">0.0 %</div>
+                </div>
+            </div>
+
+            <!-- Reconciliation Status Badge -->
+            <div id="reconciliation-badge" style="text-align: center; margin-top: 1rem; padding: 0.5rem; border-radius: 6px; font-weight: 600; font-size: 0.9rem; background: #e2e8f0; color: #334155;">
+                در انتظار ورود مقادیر
+            </div>
+        </div>
+
+        <!-- Remarks -->
+        <div style="background-color: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; margin-bottom: 1.5rem;">
+            <div class="form-group">
+                <label class="form-label">توضیحات و گزارش ناظر فرآوری</label>
+                <textarea name="remarks" class="form-textarea" rows="2" placeholder="توضیحات در مورد کیفیت لاشه، افت چربی یا راندمان..."></textarea>
+            </div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-bottom: 3rem;">
+            <a href="{% url 'processing_list' %}" class="btn btn-secondary">انصراف</a>
+            <button type="submit" id="btn-submit-processing" class="btn btn-primary" style="padding: 0.6rem 1.75rem; font-size: 1rem;">
+                ✓ ثبت سند تبدیل و به‌روزرسانی موجودی انبار
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function() {
+    const inputBody = document.getElementById('input-rows-body');
+    const outputBody = document.getElementById('output-rows-body');
+    const btnAddInput = document.getElementById('btn-add-input-row');
+    const btnAddOutput = document.getElementById('btn-add-output-row');
+
+    const statInput = document.getElementById('stat-input-weight');
+    const statOutput = document.getElementById('stat-output-weight');
+    const statVariance = document.getElementById('stat-variance-weight');
+    const statYield = document.getElementById('stat-yield-pct');
+    const recBadge = document.getElementById('reconciliation-badge');
+    const btnSubmit = document.getElementById('btn-submit-processing');
+
+    btnAddInput.addEventListener('click', function() {
+        const firstRow = inputBody.querySelector('.input-row');
+        const newRow = firstRow.cloneNode(true);
+        newRow.querySelector('.input-prod-select').value = '';
+        newRow.querySelector('.input-weight').value = '';
+        inputBody.appendChild(newRow);
+        bindRowEvents(newRow);
+        calculateReconciliation();
+    });
+
+    btnAddOutput.addEventListener('click', function() {
+        const firstRow = outputBody.querySelector('.output-row');
+        const newRow = firstRow.cloneNode(true);
+        newRow.querySelector('.output-prod-select').value = '';
+        newRow.querySelector('.output-weight').value = '';
+        const idx = outputBody.querySelectorAll('.output-row').length;
+        const cb = newRow.querySelector('.waste-checkbox');
+        cb.checked = false;
+        cb.value = idx;
+        outputBody.appendChild(newRow);
+        bindRowEvents(newRow);
+        calculateReconciliation();
+    });
+
+    function bindRowEvents(row) {
+        row.querySelectorAll('input, select').forEach(function(el) {
+            el.addEventListener('input', calculateReconciliation);
+            el.addEventListener('change', calculateReconciliation);
+        });
+        const rm = row.querySelector('.btn-remove-row');
+        if (rm) {
+            rm.addEventListener('click', function() {
+                const parent = row.parentElement;
+                if (parent.children.length > 1) {
+                    row.remove();
+                    calculateReconciliation();
+                } else {
+                    row.querySelector('select').value = '';
+                    row.querySelector('input[type="number"]').value = '';
+                    calculateReconciliation();
+                }
+            });
+        }
+    }
+
+    inputBody.querySelectorAll('.input-row').forEach(bindRowEvents);
+    outputBody.querySelectorAll('.output-row').forEach(bindRowEvents);
+
+    function calculateReconciliation() {
+        let totalIn = 0.0;
+        let totalOut = 0.0;
+        let hasInputStockError = false;
+
+        inputBody.querySelectorAll('.input-row').forEach(function(row) {
+            const select = row.querySelector('.input-prod-select');
+            const wtInput = row.querySelector('.input-weight');
+            const wt = parseFloat(wtInput.value) || 0.0;
+            if (select.value && wt > 0) {
+                totalIn += wt;
+                const opt = select.options[select.selectedIndex];
+                const bal = parseFloat(opt.getAttribute('data-balance')) || 0.0;
+                if (wt > bal) {
+                    hasInputStockError = true;
+                    wtInput.style.borderColor = 'var(--danger)';
+                } else {
+                    wtInput.style.borderColor = 'var(--border-color)';
+                }
+            }
+        });
+
+        outputBody.querySelectorAll('.output-row').forEach(function(row) {
+            const wt = parseFloat(row.querySelector('.output-weight').value) || 0.0;
+            totalOut += wt;
+        });
+
+        const variance = totalIn - totalOut;
+        const yieldPct = totalIn > 0 ? ((totalOut / totalIn) * 100).toFixed(1) : '0.0';
+
+        statInput.textContent = totalIn.toFixed(3) + ' kg';
+        statOutput.textContent = totalOut.toFixed(3) + ' kg';
+        statVariance.textContent = variance.toFixed(3) + ' kg';
+        statYield.textContent = yieldPct + ' %';
+
+        if (totalIn <= 0 || totalOut <= 0) {
+            recBadge.style.background = '#e2e8f0';
+            recBadge.style.color = '#334155';
+            recBadge.textContent = 'لطفاً مقادیر ورودی و خروجی را وارد فرمایید';
+            btnSubmit.disabled = true;
+            return;
+        }
+
+        if (hasInputStockError) {
+            recBadge.style.background = '#fee2e2';
+            recBadge.style.color = '#991b1b';
+            recBadge.textContent = 'خطا: مقدار ورودی فراتر از موجودی انبار است!';
+            btnSubmit.disabled = true;
+            return;
+        }
+
+        if (Math.abs(variance) < 0.001) {
+            recBadge.style.background = '#dcfce7';
+            recBadge.style.color = '#166534';
+            recBadge.textContent = '✓ تراز کامل و متوازن (بدون افت تبیین‌نشده)';
+            btnSubmit.disabled = false;
+        } else if (variance > 0) {
+            recBadge.style.background = '#fef3c7';
+            recBadge.style.color = '#92400e';
+            recBadge.textContent = `افت تبیین‌نشده / کسری فرآوری: ${variance.toFixed(3)} کیلوگرم (ثبت به عنوان افت مجاز)`;
+            btnSubmit.disabled = false;
+        } else {
+            recBadge.style.background = '#fee2e2';
+            recBadge.style.color = '#991b1b';
+            recBadge.textContent = `هشدار: خروجی بیشتر از ورودی است (${Math.abs(variance).toFixed(3)} kg مازاد غیرعادی)!`;
+            btnSubmit.disabled = false;
+        }
+    }
+
+    calculateReconciliation();
+})();
+</script>
+{% endblock %}

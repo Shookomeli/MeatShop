@@ -1,0 +1,415 @@
+{% extends "base.html" %}
+{% load jalali_tags %}
+
+{% block title %}حواله خروج کالا شماره {{ issue.document_number }} | واکا پروتئین{% endblock %}
+
+{% block extra_head %}
+<style>
+@page {
+    size: A5 portrait;
+    margin: 8mm;
+}
+
+@media print {
+    .top-navbar, .footer, .no-print, .messages-container {
+        display: none !important;
+    }
+    body {
+        background-color: #ffffff !important;
+        color: #000000 !important;
+        font-size: 10pt !important;
+    }
+    .main-container {
+        max-width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    .print-document {
+        border: 1px solid #333333 !important;
+        box-shadow: none !important;
+        margin: 0 !important;
+        padding: 6mm !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        page-break-after: avoid;
+    }
+    .print-document table {
+        border-color: #333333 !important;
+        font-size: 9.5pt !important;
+    }
+    .print-document th, .print-document td {
+        border-color: #333333 !important;
+        color: #000000 !important;
+        padding: 4px 6px !important;
+    }
+}
+
+.print-document {
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 2rem;
+    max-width: 920px;
+    margin: 0 auto;
+}
+
+.doc-header {
+    border-bottom: 2px solid var(--border-color);
+    padding-bottom: 1.25rem;
+    margin-bottom: 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+.doc-title {
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: var(--primary);
+    margin-bottom: 0.25rem;
+}
+
+.meta-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem 1.25rem;
+    background: #f8fafc;
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.88rem;
+}
+
+.meta-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.meta-label {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    margin-bottom: 0.2rem;
+}
+
+.meta-value {
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.weighing-summary-card {
+    background: #f1f5f9;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    text-align: center;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.weighing-stat-title {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 0.25rem;
+}
+
+.weighing-stat-val {
+    font-size: 1.35rem;
+    font-weight: 700;
+}
+
+.signatures-section {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px dashed var(--border-color);
+    text-align: center;
+}
+
+.sig-box {
+    padding: 0.5rem;
+}
+
+.sig-title {
+    font-weight: 600;
+    font-size: 0.85rem;
+    margin-bottom: 3.5rem;
+    color: var(--text-muted);
+}
+
+.sig-line {
+    border-top: 1px solid #94a3b8;
+    width: 75%;
+    margin: 0 auto;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="max-width: 920px; margin: 0 auto;">
+    <!-- Action Bar (Hidden on print) -->
+    <div class="no-print" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+        <a href="{% url 'issue_list' %}" class="btn btn-secondary btn-sm">
+            ← بازگشت به فهرست حواله‌ها
+        </a>
+        <div style="display: flex; gap: 0.5rem;">
+            <button onclick="window.print()" class="btn btn-primary btn-sm">
+                🖨️ چاپ حواله خروج (A5)
+            </button>
+            <a href="{% url 'issue_create' %}" class="btn btn-secondary btn-sm">
+                + ثبت حواله خروج جدید
+            </a>
+        </div>
+    </div>
+
+    <!-- Official Printable Document -->
+    <div class="print-document">
+        <div class="doc-header">
+            <div>
+                <h1 class="doc-title">واکا پروتئین (Vaka Protein)</h1>
+                <p style="font-size: 0.85rem; color: var(--text-muted);">
+                    حواله خروج و توزیع کالا | سند رسمی توزین و تحویل به حمل‌کننده
+                </p>
+            </div>
+            <div style="text-align: left;">
+                <div style="font-size: 1.15rem; font-weight: 700; color: #991b1b;" class="tabular-nums">
+                    {{ issue.document_number }}
+                </div>
+                <div style="font-size: 0.85rem; color: var(--text-muted);" class="tabular-nums">
+                    تاریخ سند: {{ issue.document_date|jdate }}
+                </div>
+                <div style="font-size: 0.75rem; color: var(--text-muted);" class="tabular-nums">
+                    ثبت سیستم: {{ issue.date_time|jdatetime }}
+                </div>
+                {% if issue.is_invoiced %}
+                <div style="margin-top: 0.35rem;">
+                    <a href="{% url 'invoice_detail' issue.invoice.pk %}" class="status-badge status-active" style="font-size: 0.75rem; text-decoration: none;">
+                        فاکتور شده ({{ issue.invoice.document_number }})
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Document Metadata -->
+        <div class="meta-grid">
+            <div class="meta-item">
+                <span class="meta-label">صاحب کالا:</span>
+                <span class="meta-value">{{ issue.goods_owner_name|default:"واکا پروتئین" }}</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">تحویل‌گیرنده / مشتری:</span>
+                <span class="meta-value">{{ issue.recipient_name }}</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">راننده / خودرو:</span>
+                <span class="meta-value">{{ issue.driver_name|default:"تحویل حضوری / بدون راننده" }}</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">علت خروج:</span>
+                <span class="meta-value">{{ issue.get_issue_reason_display }}</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">مقصد / نشانی تحویل:</span>
+                <span class="meta-value">{{ issue.destination_address|default:"تحویل در محل فروشگاه" }}</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">متصدی ثبت و توزین:</span>
+                <span class="meta-value"><strong>{% if issue.operator_name %}{{ issue.operator_name }}{% elif issue.operator %}{{ issue.operator.username }}{% else %}متصدی انبار{% endif %}</strong></span>
+            </div>
+        </div>
+
+        <!-- Weighing Overview Card -->
+        <div class="weighing-summary-card">
+            <div>
+                <div class="weighing-stat-title">مجموع وزن ناخالص</div>
+                <div class="weighing-stat-val tabular-nums" style="color: #1e3a8a;">
+                    {{ issue.aggregate_gross_weight|format_weight_kg }}
+                </div>
+            </div>
+            <div>
+                <div class="weighing-stat-title">مجموع کسر پارسنگ</div>
+                <div class="weighing-stat-val tabular-nums" style="color: #b91c1c;">
+                    -{{ issue.total_tare_weight_kg|format_weight_kg }}
+                </div>
+            </div>
+            <div>
+                <div class="weighing-stat-title">مجموع وزن خالص خروجی</div>
+                <div class="weighing-stat-val tabular-nums" style="color: #15803d;">
+                    {{ issue.aggregate_net_weight|format_weight_kg }}
+                </div>
+            </div>
+            <div>
+                <div class="weighing-stat-title">مبلغ کل حواله</div>
+                <div class="weighing-stat-val tabular-nums" style="color: var(--primary);">
+                    {% if issue.aggregate_total_amount %}
+                        {{ issue.aggregate_total_amount|toman_display }}
+                    {% else %}
+                        —
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Items Table -->
+        <div style="margin-bottom: 1.5rem;">
+            <h2 style="font-size: 0.95rem; font-weight: 700; margin-bottom: 0.75rem; color: var(--text-main);">
+                اقلام تفکیکی حواله خروج
+            </h2>
+            <table class="data-table" style="font-size: 0.85rem;">
+                <thead>
+                    <tr>
+                        <th style="width: 45px;">ردیف</th>
+                        <th>شرح کالا / قطعه گوشت</th>
+                        <th style="width: 110px;">دسته‌بندی</th>
+                        <th style="width: 100px;">وزن ناخالص</th>
+                        <th style="width: 95px;">پارسنگ</th>
+                        <th style="width: 100px;">وزن خالص</th>
+                        <th style="width: 110px;">قیمت واحد</th>
+                        <th style="width: 115px;">مبلغ سطر</th>
+                        <th>ملاحظات</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if issue.items.exists %}
+                        {% for item in issue.items.all %}
+                        <tr>
+                            <td class="tabular-nums" style="text-align: center;">{{ forloop.counter }}</td>
+                            <td><strong>{{ item.product.name }}</strong></td>
+                            <td style="color: var(--text-muted);">{{ item.product.category.name }}</td>
+                            <td class="tabular-nums">{{ item.gross_weight_kg|floatformat:3 }} kg</td>
+                            <td class="tabular-nums" style="color: #b91c1c;">-{{ item.total_tare_weight_kg|floatformat:3 }} kg</td>
+                            <td class="tabular-nums" style="font-weight: 700; color: #15803d;">{{ item.net_weight_kg|floatformat:3 }} kg</td>
+                            <td class="tabular-nums">
+                                {% if item.unit_price_rial %}
+                                    {{ item.unit_price_rial|toman_display }}
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+                            <td class="tabular-nums" style="font-weight: 600;">
+                                {% if item.line_total_rial %}
+                                    {{ item.line_total_rial|toman_display }}
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">{{ item.remarks|default:"—" }}</td>
+                        </tr>
+                        {% endfor %}
+                    {% elif issue.product %}
+                        <!-- Legacy single-item display -->
+                        <tr>
+                            <td class="tabular-nums" style="text-align: center;">۱</td>
+                            <td><strong>{{ issue.product.name }}</strong></td>
+                            <td style="color: var(--text-muted);">{{ issue.product.category.name }}</td>
+                            <td class="tabular-nums">{{ issue.aggregate_gross_weight|floatformat:3 }} kg</td>
+                            <td class="tabular-nums" style="color: #b91c1c;">-{{ issue.total_tare_weight_kg|floatformat:3 }} kg</td>
+                            <td class="tabular-nums" style="font-weight: 700; color: #15803d;">{{ issue.aggregate_net_weight|floatformat:3 }} kg</td>
+                            <td class="tabular-nums">
+                                {% if issue.unit_price_rial %}
+                                    {{ issue.unit_price_rial|toman_display }}
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+                            <td class="tabular-nums" style="font-weight: 600;">
+                                {% if issue.line_total_rial %}
+                                    {{ issue.line_total_rial|toman_display }}
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+                            <td style="font-size: 0.8rem; color: var(--text-muted);">{{ issue.remarks|default:"—" }}</td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+                <tfoot>
+                    <tr style="background: #f8fafc; font-weight: 700;">
+                        <td colspan="3" style="text-align: left; padding: 0.6rem 0.75rem;">
+                            مجموع کل اوزان و مبالغ:
+                        </td>
+                        <td class="tabular-nums" style="padding: 0.6rem 0.75rem;">
+                            {{ issue.aggregate_gross_weight|floatformat:3 }} kg
+                        </td>
+                        <td class="tabular-nums" style="color: #b91c1c; padding: 0.6rem 0.75rem;">
+                            -{{ issue.total_tare_weight_kg|floatformat:3 }} kg
+                        </td>
+                        <td class="tabular-nums" style="color: #15803d; padding: 0.6rem 0.75rem;">
+                            {{ issue.aggregate_net_weight|floatformat:3 }} kg
+                        </td>
+                        <td></td>
+                        <td class="tabular-nums" style="color: var(--primary); padding: 0.6rem 0.75rem;">
+                            {% if issue.aggregate_total_amount %}
+                                {{ issue.aggregate_total_amount|toman_display }}
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+                        <td></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+
+        <!-- Container Tare Rows (if any) -->
+        {% if issue.tare_rows.exists %}
+        <div style="margin-bottom: 1.5rem;">
+            <h2 style="font-size: 0.95rem; font-weight: 700; margin-bottom: 0.75rem; color: var(--text-main);">
+                تفکیک پارسنگ ظروف توزین
+            </h2>
+            <table class="data-table" style="font-size: 0.85rem;">
+                <thead>
+                    <tr>
+                        <th style="width: 50px;">ردیف</th>
+                        <th>نوع ظرف / پارسنگ</th>
+                        <th style="width: 140px;">وزن واحد (گرم)</th>
+                        <th style="width: 100px;">تعداد</th>
+                        <th style="width: 140px;">مجموع پارسنگ سطر</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in issue.tare_rows.all %}
+                    <tr>
+                        <td class="tabular-nums" style="text-align: center;">{{ forloop.counter }}</td>
+                        <td>{{ row.tare_name_snapshot }}</td>
+                        <td class="tabular-nums">{{ row.unit_tare_grams|fa_digits }} گرم</td>
+                        <td class="tabular-nums">{{ row.quantity|fa_digits }}</td>
+                        <td class="tabular-nums" style="font-weight: 600; color: #b91c1c;">
+                            {{ row.subtotal_tare_kg|format_weight_kg }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        {% if issue.remarks %}
+        <div style="margin-bottom: 1rem; padding: 0.75rem; background: #f8fafc; border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 0.85rem;">
+            <strong>توضیحات و ملاحظات حواله:</strong> {{ issue.remarks }}
+        </div>
+        {% endif %}
+
+        <!-- Signatures Section -->
+        <div class="signatures-section">
+            <div class="sig-box">
+                <div class="sig-title">امضاء و تأیید انباردار / تحویل‌دهنده</div>
+                <div class="sig-line"></div>
+            </div>
+            <div class="sig-box">
+                <div class="sig-title">امضاء راننده / حمل‌کننده کالا</div>
+                <div class="sig-line"></div>
+            </div>
+            <div class="sig-box">
+                <div class="sig-title">امضاء و مهر تحویل‌گیرنده / خریدار</div>
+                <div class="sig-line"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

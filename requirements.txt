@@ -1,0 +1,5 @@
+Django>=5.1,<6.1
+django-environ>=0.11.0
+pytest>=8.0.0
+pytest-django>=4.8.0
+jdatetime>=5.0.0

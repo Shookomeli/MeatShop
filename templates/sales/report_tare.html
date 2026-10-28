@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}گزارش تحلیل و فراوانی پارسنگ ظروف | فروشگاه گوشت و مرغ{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 2rem;">
+    <!-- Header -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+        <div>
+            <a href="{% url 'reports_hub' %}" style="color: var(--text-muted); font-size: 0.85rem; text-decoration: none;">
+                ← بازگشت به مرکز گزارش‌ها
+            </a>
+            <h1 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main); margin-top: 0.35rem;">
+                تحلیل آماری و فراوانی مصرف ظروف پارسنگ
+            </h1>
+        </div>
+        <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 0.6rem 1.25rem;">
+            <span style="font-size: 0.85rem; color: #991b1b;">کل پارسنگ کسرشده در توزین‌ها:</span>
+            <strong style="font-size: 1.25rem; color: #b91c1c; margin-right: 0.35rem;" class="tabular-nums">
+                {{ grand_tare_kg|floatformat:3 }} kg
+            </strong>
+        </div>
+    </div>
+
+    <!-- Tare Types Statistics Table -->
+    <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem;">
+        <h2 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 0.75rem; color: var(--text-main);">
+            آمار تفکیکی ظروف، سبدها، قلاب‌ها و پالت‌ها
+        </h2>
+        <div class="table-responsive">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th style="width: 45px;">ردیف</th>
+                        <th>نام ظرف / نوع پارسنگ</th>
+                        <th>وزن هر واحد (گرم)</th>
+                        <th>وزن هر واحد (کیلوگرم)</th>
+                        <th>نوع ظرف</th>
+                        <th>تعداد کل استفاده در اسناد</th>
+                        <th>مجموع وزن پارسنگ کسرشده</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for stat in tare_stats %}
+                    <tr>
+                        <td class="tabular-nums" style="font-size: 0.8rem; color: var(--text-muted);">
+                            {{ forloop.counter }}
+                        </td>
+                        <td><strong>{{ stat.tare_type.name }}</strong></td>
+                        <td class="tabular-nums">{{ stat.tare_type.tare_weight_grams }} g</td>
+                        <td class="tabular-nums">{{ stat.tare_type.tare_weight_kg|floatformat:3 }} kg</td>
+                        <td>
+                            {% if stat.tare_type.is_custom %}
+                            <span class="status-badge status-inactive">متغیر دستی</span>
+                            {% else %}
+                            <span class="status-badge status-active">استاندارد ثابت</span>
+                            {% endif %}
+                        </td>
+                        <td class="tabular-nums" style="font-weight: 600;">
+                            {{ stat.count_used }} بار
+                        </td>
+                        <td class="tabular-nums" style="font-weight: 700; color: #b91c1c;">
+                            {{ stat.total_tare_kg|floatformat:3 }} kg
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                            ظرفی تعریف نشده است.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

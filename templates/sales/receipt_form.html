@@ -1,0 +1,717 @@
+{% extends "base.html" %}
+
+{% block title %}ثبت رسید ورود چندقلمی کالا به انبار | فروشگاه گوشت و مرغ{% endblock %}
+
+{% block content %}
+<div style="max-width: 950px; margin: 0 auto;">
+    <!-- Breadcrumb & Header -->
+    <div style="margin-bottom: 1.25rem;">
+        <a href="{% url 'receipt_list' %}" style="color: var(--text-muted); font-size: 0.85rem; text-decoration: none;">
+            ← بازگشت به فهرست رسیدهای ورود کالا
+        </a>
+        <h1 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main); margin-top: 0.35rem;">
+            ثبت رسید ورود گوشت و کالا به انبار (چندقلمی)
+        </h1>
+        <p style="font-size: 0.85rem; color: var(--text-muted);">
+            امکان ثبت همزمان چند قلم کالا در یک رسید با توزین مستقل باسکول، کسر تفکیکی پارسنگ، کنترل کیفی و افزایش خودکار موجودی انبار.
+        </p>
+    </div>
+
+    <form method="POST" id="receipt-form">
+        {% csrf_token %}
+        <input type="hidden" name="idempotency_key" id="idempotency_key">
+        <input type="hidden" name="items_json" id="items_json">
+
+        {% if form_errors %}
+        <div style="background-color: #fef2f2; border: 1px solid #f87171; border-radius: 8px; padding: 1rem; margin-bottom: 1.25rem; color: #991b1b;">
+            <div style="font-weight: 700; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+                <span>⚠️</span>
+                <span>خطاهای ثبت رسید ورود کالا:</span>
+            </div>
+            <ul style="margin: 0; padding-right: 1.5rem; font-size: 0.88rem; line-height: 1.6;">
+                {% for err in form_errors %}
+                <li>{{ err }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <!-- 1. Header Information (Shared Document Info) -->
+        <div style="background-color: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; margin-bottom: 1.25rem;">
+            <h2 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 1rem; color: var(--text-main);">
+                ۱. مشخصات تأمین‌کننده، تاریخ و متصدی سند
+            </h2>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
+                <div class="form-group">
+                    <label class="form-label">نام تأمین‌کننده / کشتارگاه / مبدأ <span style="color: var(--danger);">*</span></label>
+                    <input type="text" name="supplier_name" id="supplier_name" class="form-input" placeholder="مثلاً: کشتارگاه صنعتی ماکیان" value="{{ form_data.supplier_name }}" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">شماره بارنامه / فاکتور مبدأ</label>
+                    <input type="text" name="supplier_document_ref" class="form-input" placeholder="اختیاری (مثلاً: B-98210)" value="{{ form_data.supplier_document_ref }}">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">تاریخ سند (شمسی یا میلادی) <span style="color: var(--danger);">*</span></label>
+                    <input type="text" name="document_date" id="document_date" class="form-input" placeholder="۱۴۰۴/۰۸/۰۵ یا 2026-10-26" value="{{ form_data.document_date }}" required dir="ltr">
+                    <span style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-top: 2px;">
+                        پیش‌فرض: امروز (ثبت تاریخ گذشته مجاز است)
+                    </span>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">مسئول توزین / متصدی</label>
+                    <select name="operator_select" id="operator_select" class="form-select">
+                        <option value="">-- انتخاب مسئول توزین --</option>
+                        {% for op in operators %}
+                        <option value="{{ op.name }}" {% if form_data.operator_name == op.name %}selected{% endif %}>
+                            {{ op.name }} (کد: {{ op.code }})
+                        </option>
+                        {% endfor %}
+                        <option value="__custom__" {% if form_data.operator_name == '__custom__' or form_data.operator_custom %}selected{% endif %}>
+                            ✍️ سایر (ورود دستی نام متصدی)...
+                        </option>
+                    </select>
+                    <input type="text" name="operator_custom" id="operator_custom" class="form-input" placeholder="نام متصدی یا مسئول انبار" value="{{ form_data.operator_custom }}" style="margin-top: 0.4rem; {% if not form_data.operator_custom and form_data.operator_name != '__custom__' %}display: none;{% endif %}">
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. Active Weighing & Product Selection Section -->
+        <div style="background-color: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; margin-bottom: 1.25rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <div>
+                    <h2 style="font-size: 1.05rem; font-weight: 700; color: var(--text-main);">
+                        ۲. توزین و افزودن کالا به رسید
+                    </h2>
+                    <p style="font-size: 0.8rem; color: var(--text-muted);">
+                        کالا را انتخاب کرده، وزن باسکول و پارسنگ ظروف را مشخص نمایید، سپس روی «افزودن کالا به رسید» کلیک کنید.
+                    </p>
+                </div>
+                <!-- Scale Status Badge -->
+                <div id="scale-status-badge" style="font-size: 0.8rem; padding: 0.2rem 0.6rem; border-radius: 4px; background: #e0f2fe; color: #0369a1;">
+                    وضعیت ترازو: آماده خوانش
+                </div>
+            </div>
+
+            <!-- Category Filter Buttons -->
+            <div style="margin-bottom: 0.75rem;">
+                <label class="form-label" style="font-size: 0.82rem; color: var(--text-muted);">فیلتر بر اساس دسته‌بندی کالا:</label>
+                <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;" id="category-filters">
+                    <button type="button" class="btn btn-sm btn-secondary cat-btn active" data-cat="all" style="font-size: 0.8rem;">
+                        همه دسته‌ها
+                    </button>
+                    {% for cat in categories %}
+                    <button type="button" class="btn btn-sm btn-secondary cat-btn" data-cat="{{ cat.id }}" style="font-size: 0.8rem;">
+                        {{ cat.name }}
+                    </button>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Product Search & Dropdown -->
+            <div style="margin-bottom: 1rem;">
+                <label class="form-label">جستجو و انتخاب کالا / برش گوشت <span style="color: var(--danger);">*</span></label>
+                <div style="display: flex; gap: 0.5rem; margin-bottom: 0.4rem;">
+                    <input type="text" id="product-search" class="form-input" placeholder="🔍 جستجوی نام یا کد کالا (مثلاً: ران گوسفندی یا 101)..." style="font-size: 0.88rem;">
+                </div>
+                <select id="product-select" class="form-select" size="4" style="height: auto; max-height: 140px;">
+                    <option value="" disabled selected>-- انتخاب کالا از کاتالوگ --</option>
+                    {% for p in products %}
+                    <option value="{{ p.id }}" data-category="{{ p.category.id }}" data-category-name="{{ p.category.name }}" data-code="{{ p.code|default:'' }}" data-name="{{ p.name }}" data-is-parent="{% if p.is_parent %}1{% else %}0{% endif %}">
+                        {% if p.is_parent %}⭐ [کالای والد] {% endif %}{{ p.name }} {% if p.code %}[کد: {{ p.code }}]{% endif %} (دسته‌بندی: {{ p.category.name }})
+                    </option>
+                    {% endfor %}
+                </select>
+                <div id="product-count-feedback" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;"></div>
+
+                <!-- Authoritative Selected Product Feedback Card -->
+                <div id="selected-product-card" style="display: none; margin-top: 0.75rem; padding: 0.75rem 1rem; background: #f0fdf4; border: 2px solid #86efac; border-radius: 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+                        <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                            <span style="background: #15803d; color: #ffffff; font-size: 0.75rem; font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 4px;">
+                                ✓ کالای انتخاب‌شده
+                            </span>
+                            <span id="selected-card-name" style="font-size: 1.05rem; font-weight: 800; color: #166534;"></span>
+                            <span id="selected-card-parent-badge" style="display: none; background: #dbeafe; color: #1e40af; font-size: 0.75rem; font-weight: 600; padding: 0.15rem 0.45rem; border-radius: 4px;">کالای اصلی والد</span>
+                            <span id="selected-card-code" style="font-size: 0.82rem; background: #e2e8f0; color: #334155; padding: 0.15rem 0.45rem; border-radius: 4px; font-family: monospace;"></span>
+                            <span id="selected-card-category" style="font-size: 0.82rem; color: var(--text-muted);"></span>
+                        </div>
+                        <button type="button" id="btn-clear-selection" class="btn btn-secondary btn-sm" style="font-size: 0.78rem; padding: 0.25rem 0.65rem;">
+                            تغییر / حذف کالا
+                        </button>
+                    </div>
+                </div>
+                <!-- Hidden input holding current line product ID -->
+                <input type="hidden" id="active-line-product-id" name="product">
+            </div>
+
+            <!-- Weighing & Scale -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; align-items: center; margin-bottom: 1rem; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; padding: 1rem;">
+                <div style="text-align: center;">
+                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem;">نمایشگر وزن باسکول</div>
+                    <div id="scale-display" style="font-size: 2rem; font-weight: 700; color: #1e3a8a; font-family: monospace;" class="tabular-nums">
+                        0.000 <span style="font-size: 1rem; font-weight: 500;">kg</span>
+                    </div>
+                    <button type="button" id="btn-fetch-scale" class="btn btn-primary btn-sm" style="margin-top: 0.5rem;">
+                        ⚡ خواندن وزن مستقیم از باسکول
+                    </button>
+                </div>
+                <div>
+                    <label class="form-label" style="font-size: 0.85rem;">وزن ناخالص این قلم (kg) <span style="color: var(--danger);">*</span></label>
+                    <input type="number" step="0.001" min="0.001" id="active-gross-weight" class="form-input weight-input" style="font-size: 1.1rem; font-weight: 700;" placeholder="0.000" dir="ltr">
+                    <span style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-top: 3px;">
+                        از باسکول خوانده یا به صورت دستی وارد نمایید.
+                    </span>
+                </div>
+            </div>
+
+            <!-- Multi-Row Tare for Current Item -->
+            <div style="margin-bottom: 1rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <label class="form-label" style="margin-bottom: 0; font-size: 0.85rem;">پارسنگ ظروف این قلم:</label>
+                    <button type="button" id="btn-add-tare-row" class="btn btn-secondary btn-sm" style="font-size: 0.75rem;">
+                        + افزودن ظرف پارسنگ
+                    </button>
+                </div>
+                <table class="data-table" id="tare-table" style="font-size: 0.85rem;">
+                    <thead>
+                        <tr>
+                            <th>نوع ظرف / پارسنگ</th>
+                            <th style="width: 100px;">تعداد</th>
+                            <th style="width: 130px;">وزن دستی (گرم)</th>
+                            <th style="width: 120px;">مجموع سطر (kg)</th>
+                            <th style="width: 50px; text-align: center;">حذف</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tare-rows-body">
+                        <tr class="tare-row">
+                            <td>
+                                <select class="form-select tare-type-select">
+                                    <option value="">-- بدون ظرف / فله --</option>
+                                    {% for tt in tare_types %}
+                                    <option value="{{ tt.id }}" data-grams="{{ tt.tare_weight_grams }}" data-custom="{% if tt.is_custom %}1{% else %}0{% endif %}">
+                                        {{ tt.name }} ({{ tt.tare_weight_kg }} kg)
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td><input type="number" class="form-input tare-qty-input weight-input" value="1" min="1" dir="ltr"></td>
+                            <td><input type="number" class="form-input custom-grams-input weight-input" placeholder="گرم" min="0" dir="ltr" disabled></td>
+                            <td class="tabular-nums subtotal-cell" style="font-weight: 600;">0.000 kg</td>
+                            <td style="text-align: center;"><button type="button" class="btn btn-danger btn-sm btn-remove-tare">×</button></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Package Count, Price & Line Notes -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
+                <div class="form-group">
+                    <label class="form-label" style="font-size: 0.85rem;">تعداد بسته / لاشه:</label>
+                    <input type="number" id="active-package-count" class="form-input weight-input" min="1" placeholder="مثلاً: ۱۵" dir="ltr">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" style="font-size: 0.85rem;">قیمت واحد خرید (ریال / kg):</label>
+                    <input type="number" id="active-unit-price" class="form-input weight-input" placeholder="اختیاری (مثلاً: ۲۵۰۰۰۰۰)" min="0" dir="ltr">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" style="font-size: 0.85rem;">وضعیت سلامت و کیفیت:</label>
+                    <input type="text" id="active-condition-notes" class="form-input" placeholder="مثلاً: کیفیت درجه یک، تازه">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" style="font-size: 0.85rem;">ملاحظات قلم کالا:</label>
+                    <input type="text" id="active-line-remarks" class="form-input" placeholder="یادداشت متصدی">
+                </div>
+            </div>
+
+            <!-- Net Weight Live Display & Add Product Button -->
+            <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 0.75rem; border-top: 1px solid var(--border-subtle); flex-wrap: wrap; gap: 0.75rem;">
+                <div>
+                    <span style="font-size: 0.85rem; color: var(--text-muted);">وزن خالص این قلم:</span>
+                    <strong id="active-calculated-net" class="tabular-nums" style="font-size: 1.2rem; color: #15803d; margin-right: 0.35rem;">0.000 kg</strong>
+                </div>
+                <button type="button" id="btn-add-product-to-receipt" class="btn btn-success" style="padding: 0.5rem 1.25rem;">
+                    ➕ افزودن این کالا به رسید (Add Product)
+                </button>
+            </div>
+            <div id="active-item-error" style="display: none; margin-top: 0.5rem; padding: 0.5rem 0.75rem; background: #fee2e2; border: 1px solid #fca5a5; border-radius: 6px; color: #991b1b; font-size: 0.82rem;"></div>
+        </div>
+
+        <!-- 3. Review Table of Committed Receipt Items -->
+        <div style="background-color: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; margin-bottom: 1.25rem;">
+            <h2 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 0.75rem; color: var(--text-main);">
+                ۳. اقلام ثبت‌شده در این رسید ورود
+            </h2>
+
+            <div class="table-responsive">
+                <table class="data-table" id="committed-receipt-items-table" style="font-size: 0.88rem;">
+                    <thead>
+                        <tr>
+                            <th style="width: 45px;">ردیف</th>
+                            <th>شرح کالا / قطعه گوشت</th>
+                            <th style="width: 105px;">وزن ناخالص</th>
+                            <th style="width: 100px;">پارسنگ</th>
+                            <th style="width: 110px;">وزن خالص</th>
+                            <th style="width: 105px;">قیمت واحد</th>
+                            <th style="width: 80px;">تعداد</th>
+                            <th>کنترل کیفی / ملاحظات</th>
+                            <th style="width: 60px; text-align: center;">حذف</th>
+                        </tr>
+                    </thead>
+                    <tbody id="committed-receipt-items-body">
+                        <tr id="empty-receipt-items-row">
+                            <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">
+                                هنوز هیچ کالایی اضافه نشده است. کالا را در بخش بالا توزین کرده و روی «افزودن این کالا به رسید» کلیک کنید.
+                            </td>
+                        </tr>
+                    </tbody>
+                    <tfoot>
+                        <tr style="background: #f8fafc; font-weight: 700;">
+                            <td colspan="2" style="text-align: left; padding: 0.6rem 0.75rem;">
+                                مجموع کل اقلام رسید:
+                            </td>
+                            <td id="grand-receipt-gross" class="tabular-nums" style="padding: 0.6rem 0.75rem; color: #1e3a8a;">0.000 kg</td>
+                            <td id="grand-receipt-tare" class="tabular-nums" style="padding: 0.6rem 0.75rem; color: #b91c1c;">-0.000 kg</td>
+                            <td id="grand-receipt-net" class="tabular-nums" style="padding: 0.6rem 0.75rem; color: #15803d; font-size: 1.1rem;">0.000 kg</td>
+                            <td></td>
+                            <td id="grand-receipt-pkgs" class="tabular-nums" style="padding: 0.6rem 0.75rem;">0 عدد</td>
+                            <td colspan="2"></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+
+        <!-- 4. General Remarks Section -->
+        <div style="background-color: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; margin-bottom: 1.5rem;">
+            <div class="form-group">
+                <label class="form-label">ملاحظات و توضیحات عمومی رسید</label>
+                <textarea name="remarks" class="form-textarea" rows="2" placeholder="یادداشت‌های کلی درباره محموله، پلاک خودرو، بارنامه یا انبار...">{{ form_data.remarks }}</textarea>
+            </div>
+        </div>
+
+        <!-- Submit & Actions -->
+        <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-bottom: 3rem;">
+            <a href="{% url 'receipt_list' %}" class="btn btn-secondary">
+                انصراف
+            </a>
+            <button type="submit" id="btn-submit-receipt" class="btn btn-primary" style="padding: 0.6rem 1.75rem; font-size: 1rem;" disabled>
+                ✓ ثبت قطعی رسید و صدور سند انبار
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function() {
+    // Generate unique idempotency key
+    const idempInput = document.getElementById('idempotency_key');
+    if (idempInput) {
+        idempInput.value = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : ('idemp-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9));
+    }
+
+    // Product search & category filter logic
+    const productSelect = document.getElementById('product-select');
+    const searchInput = document.getElementById('product-search');
+    const catButtons = document.querySelectorAll('.cat-btn');
+    const countFeedback = document.getElementById('product-count-feedback');
+    const allOptions = Array.from(productSelect.options).filter(opt => opt.value !== "");
+
+    const selectedProductCard = document.getElementById('selected-product-card');
+    const selectedCardName = document.getElementById('selected-card-name');
+    const selectedCardCode = document.getElementById('selected-card-code');
+    const selectedCardCategory = document.getElementById('selected-card-category');
+    const btnClearSelection = document.getElementById('btn-clear-selection');
+    const activeLineProductId = document.getElementById('active-line-product-id');
+
+    let activeCat = 'all';
+
+    function normalizeDigits(str) {
+        if (!str) return '';
+        return str
+            .replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d))
+            .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+    }
+
+    // Operator custom field toggle
+    const opSelect = document.getElementById('operator_select');
+    const opCustom = document.getElementById('operator_custom');
+    if (opSelect && opCustom) {
+        opSelect.addEventListener('change', function() {
+            if (this.value === '__custom__') {
+                opCustom.style.display = 'block';
+                opCustom.focus();
+            } else {
+                opCustom.style.display = 'none';
+            }
+        });
+    }
+
+    function filterProducts() {
+        const query = normalizeDigits(searchInput.value.trim().toLowerCase());
+        let visibleCount = 0;
+
+        allOptions.forEach(opt => {
+            const cat = opt.getAttribute('data-category');
+            const name = normalizeDigits((opt.getAttribute('data-name') || '').toLowerCase());
+            const code = normalizeDigits((opt.getAttribute('data-code') || '').toLowerCase());
+
+            const matchesCat = (activeCat === 'all' || cat === activeCat);
+            const matchesQuery = (!query || name.includes(query) || code.includes(query));
+
+            if (matchesCat && matchesQuery) {
+                opt.style.display = '';
+                visibleCount++;
+            } else {
+                opt.style.display = 'none';
+            }
+        });
+
+        countFeedback.textContent = `${visibleCount} قلم کالا در این دسته‌بندی یافت شد.`;
+    }
+
+    catButtons.forEach(btn => {
+        btn.addEventListener('click', function() {
+            catButtons.forEach(b => b.classList.remove('active', 'btn-primary'));
+            catButtons.forEach(b => b.classList.add('btn-secondary'));
+            this.classList.remove('btn-secondary');
+            this.classList.add('active', 'btn-primary');
+            activeCat = this.getAttribute('data-cat');
+            filterProducts();
+        });
+    });
+
+    searchInput.addEventListener('input', filterProducts);
+    filterProducts();
+
+    const selectedCardParentBadge = document.getElementById('selected-card-parent-badge');
+
+    // Select Product Handler - updates card & hidden input synchronously
+    productSelect.addEventListener('change', function() {
+        const opt = productSelect.options[productSelect.selectedIndex];
+        if (opt && opt.value) {
+            setSelectedProduct(opt.value, opt.getAttribute('data-name'), opt.getAttribute('data-code'), opt.getAttribute('data-category-name'), opt.getAttribute('data-is-parent') === '1');
+        }
+    });
+
+    function setSelectedProduct(id, name, code, categoryName, isParent) {
+        activeLineProductId.value = id;
+        selectedCardName.textContent = name;
+        if (selectedCardParentBadge) {
+            selectedCardParentBadge.style.display = isParent ? 'inline-block' : 'none';
+        }
+        if (code) {
+            selectedCardCode.textContent = `کد: ${code}`;
+            selectedCardCode.style.display = 'inline-block';
+        } else {
+            selectedCardCode.style.display = 'none';
+        }
+        selectedCardCategory.textContent = categoryName ? `(دسته‌بندی: ${categoryName})` : '';
+        selectedProductCard.style.display = 'block';
+    }
+
+    btnClearSelection.addEventListener('click', function() {
+        activeLineProductId.value = '';
+        productSelect.selectedIndex = 0;
+        selectedProductCard.style.display = 'none';
+    });
+
+    // Scale integration
+    const grossInput = document.getElementById('active-gross-weight');
+    const scaleDisplay = document.getElementById('scale-display');
+    const scaleStatusBadge = document.getElementById('scale-status-badge');
+    const btnFetchScale = document.getElementById('btn-fetch-scale');
+
+    btnFetchScale.addEventListener('click', async function() {
+        scaleStatusBadge.textContent = 'در حال خواندن از ترازو...';
+        scaleStatusBadge.style.background = '#fef3c7';
+        scaleStatusBadge.style.color = '#92400e';
+        try {
+            const resp = await fetch("{% url 'scale_read_api' %}");
+            const data = await resp.json();
+            if (data.success) {
+                const wt = data.weight_kg.toFixed(3);
+                scaleDisplay.innerHTML = `${wt} <span style="font-size: 1rem; font-weight: 500;">kg</span>`;
+                grossInput.value = wt;
+                scaleStatusBadge.textContent = data.is_stable ? 'وزن پایدار است' : 'وزن ناپایدار (در حال تغییر)';
+                scaleStatusBadge.style.background = data.is_stable ? '#dcfce7' : '#fee2e2';
+                scaleStatusBadge.style.color = data.is_stable ? '#166534' : '#991b1b';
+                calculateActiveNet();
+            } else {
+                scaleStatusBadge.textContent = 'خطا: ' + data.error;
+                scaleStatusBadge.style.background = '#fee2e2';
+                scaleStatusBadge.style.color = '#991b1b';
+            }
+        } catch (e) {
+            scaleStatusBadge.textContent = 'خطا در ارتباط با ترازو';
+            scaleStatusBadge.style.background = '#fee2e2';
+            scaleStatusBadge.style.color = '#991b1b';
+        }
+    });
+
+    // Tare row logic for active line
+    const tareRowsBody = document.getElementById('tare-rows-body');
+    const btnAddTareRow = document.getElementById('btn-add-tare-row');
+    const activeCalculatedNet = document.getElementById('active-calculated-net');
+
+    btnAddTareRow.addEventListener('click', function() {
+        const firstRow = tareRowsBody.querySelector('.tare-row');
+        const newRow = firstRow.cloneNode(true);
+        newRow.querySelector('.tare-qty-input').value = 1;
+        newRow.querySelector('.custom-grams-input').value = '';
+        newRow.querySelector('.custom-grams-input').disabled = true;
+        newRow.querySelector('.subtotal-cell').textContent = '0.000 kg';
+        tareRowsBody.appendChild(newRow);
+        bindTareRowEvents(newRow);
+        calculateActiveNet();
+    });
+
+    function bindTareRowEvents(row) {
+        const select = row.querySelector('.tare-type-select');
+        const qtyInput = row.querySelector('.tare-qty-input');
+        const customInput = row.querySelector('.custom-grams-input');
+        const removeBtn = row.querySelector('.btn-remove-tare');
+
+        select.addEventListener('change', function() {
+            const opt = select.options[select.selectedIndex];
+            const isCustom = opt.getAttribute('data-custom') === '1';
+            customInput.disabled = !isCustom;
+            if (!isCustom) customInput.value = '';
+            calculateActiveNet();
+        });
+
+        qtyInput.addEventListener('input', calculateActiveNet);
+        customInput.addEventListener('input', calculateActiveNet);
+
+        removeBtn.addEventListener('click', function() {
+            if (tareRowsBody.querySelectorAll('.tare-row').length > 1) {
+                row.remove();
+                calculateActiveNet();
+            } else {
+                select.value = '';
+                qtyInput.value = 1;
+                customInput.value = '';
+                customInput.disabled = true;
+                calculateActiveNet();
+            }
+        });
+    }
+
+    tareRowsBody.querySelectorAll('.tare-row').forEach(bindTareRowEvents);
+    grossInput.addEventListener('input', calculateActiveNet);
+
+    function getActiveTareDetails() {
+        let totalGrams = 0;
+        const entries = [];
+        tareRowsBody.querySelectorAll('.tare-row').forEach(row => {
+            const select = row.querySelector('.tare-type-select');
+            const qty = parseInt(row.querySelector('.tare-qty-input').value) || 0;
+            const customGrams = parseInt(row.querySelector('.custom-grams-input').value) || 0;
+            const subtotalCell = row.querySelector('.subtotal-cell');
+
+            if (!select.value || qty <= 0) {
+                subtotalCell.textContent = '0.000 kg';
+                return;
+            }
+
+            const opt = select.options[select.selectedIndex];
+            const isCustom = opt.getAttribute('data-custom') === '1';
+            const unitGrams = isCustom ? customGrams : (parseInt(opt.getAttribute('data-grams')) || 0);
+            const rowGrams = unitGrams * qty;
+            totalGrams += rowGrams;
+            subtotalCell.textContent = (rowGrams / 1000).toFixed(3) + ' kg';
+
+            entries.push({
+                tare_type_id: select.value,
+                tare_name: opt.text.split('(')[0].trim(),
+                quantity: qty,
+                custom_tare_grams: isCustom ? customGrams : 0,
+                unit_grams: unitGrams,
+                subtotal_kg: rowGrams / 1000.0,
+            });
+        });
+        return { totalGrams, entries };
+    }
+
+    function calculateActiveNet() {
+        const gross = parseFloat(grossInput.value) || 0.0;
+        const { totalGrams } = getActiveTareDetails();
+        const tareKg = totalGrams / 1000.0;
+        const netKg = gross - tareKg;
+        activeCalculatedNet.textContent = (netKg > 0 ? netKg.toFixed(3) : '0.000') + ' kg';
+        return { gross, tareKg, netKg };
+    }
+
+    // Committed Items Table Management
+    const committedReceiptItems = [];
+    const committedBody = document.getElementById('committed-receipt-items-body');
+    const btnAddProductToReceipt = document.getElementById('btn-add-product-to-receipt');
+    const activeItemError = document.getElementById('active-item-error');
+    const btnSubmitReceipt = document.getElementById('btn-submit-receipt');
+    const itemsJsonInput = document.getElementById('items_json');
+
+    const grandGross = document.getElementById('grand-receipt-gross');
+    const grandTare = document.getElementById('grand-receipt-tare');
+    const grandNet = document.getElementById('grand-receipt-net');
+    const grandPkgs = document.getElementById('grand-receipt-pkgs');
+
+    btnAddProductToReceipt.addEventListener('click', function() {
+        activeItemError.style.display = 'none';
+
+        const prodId = activeLineProductId.value;
+        if (!prodId) {
+            showActiveError('لطفاً ابتدا کالا را از فهرست کاتالوگ انتخاب نمایید.');
+            return;
+        }
+
+        const prodName = selectedCardName.textContent;
+        const { gross, tareKg, netKg } = calculateActiveNet();
+
+        if (gross <= 0) {
+            showActiveError('لطفاً وزن ناخالص کالا را از باسکول بخوانید یا دستی وارد نمایید.');
+            return;
+        }
+        if (netKg <= 0) {
+            showActiveError('وزن ناخالص نمی‌تواند کمتر یا مساوی مجموع وزن پارسنگ ظروف باشد.');
+            return;
+        }
+
+        const pkgCount = parseInt(document.getElementById('active-package-count').value) || null;
+        const unitPriceVal = document.getElementById('active-unit-price').value.trim();
+        const unitPrice = unitPriceVal ? parseFloat(unitPriceVal) : null;
+        const conditionNotes = document.getElementById('active-condition-notes').value.trim();
+        const remarks = document.getElementById('active-line-remarks').value.trim();
+        const { entries } = getActiveTareDetails();
+
+        committedReceiptItems.push({
+            product_id: parseInt(prodId),
+            product_name: prodName,
+            gross_weight_kg: gross,
+            total_tare_weight_kg: tareKg,
+            net_weight_kg: netKg,
+            unit_price: unitPrice,
+            package_count: pkgCount,
+            condition_notes: conditionNotes,
+            remarks: remarks,
+            tare_entries: entries,
+        });
+
+        // Reset active line inputs for next cut
+        grossInput.value = '';
+        document.getElementById('active-unit-price').value = '';
+        document.getElementById('active-package-count').value = '';
+        document.getElementById('active-condition-notes').value = '';
+        document.getElementById('active-line-remarks').value = '';
+        scaleDisplay.innerHTML = '0.000 <span style="font-size: 1rem; font-weight: 500;">kg</span>';
+        activeCalculatedNet.textContent = '0.000 kg';
+        activeLineProductId.value = '';
+        productSelect.selectedIndex = 0;
+        selectedProductCard.style.display = 'none';
+
+        // Reset tare rows to 1 default row
+        tareRowsBody.innerHTML = `
+            <tr class="tare-row">
+                <td>
+                    <select class="form-select tare-type-select">
+                        <option value="">-- بدون ظرف / فله --</option>
+                        {% for tt in tare_types %}
+                        <option value="{{ tt.id }}" data-grams="{{ tt.tare_weight_grams }}" data-custom="{% if tt.is_custom %}1{% else %}0{% endif %}">
+                            {{ tt.name }} ({{ tt.tare_weight_kg }} kg)
+                        </option>
+                        {% endfor %}
+                    </select>
+                </td>
+                <td><input type="number" class="form-input tare-qty-input weight-input" value="1" min="1" dir="ltr"></td>
+                <td><input type="number" class="form-input custom-grams-input weight-input" placeholder="گرم" min="0" dir="ltr" disabled></td>
+                <td class="tabular-nums subtotal-cell" style="font-weight: 600;">0.000 kg</td>
+                <td style="text-align: center;"><button type="button" class="btn btn-danger btn-sm btn-remove-tare">×</button></td>
+            </tr>
+        `;
+        tareRowsBody.querySelectorAll('.tare-row').forEach(bindTareRowEvents);
+
+        renderCommittedReceiptTable();
+    });
+
+    function showActiveError(msg) {
+        activeItemError.textContent = msg;
+        activeItemError.style.display = 'block';
+    }
+
+    function renderCommittedReceiptTable() {
+        if (committedReceiptItems.length === 0) {
+            committedBody.innerHTML = `
+                <tr id="empty-receipt-items-row">
+                    <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">
+                        هنوز هیچ کالایی اضافه نشده است. کالا را در بخش بالا توزین کرده و روی «افزودن این کالا به رسید» کلیک کنید.
+                    </td>
+                </tr>
+            `;
+            btnSubmitReceipt.disabled = true;
+            grandGross.textContent = '0.000 kg';
+            grandTare.textContent = '-0.000 kg';
+            grandNet.textContent = '0.000 kg';
+            grandPkgs.textContent = '0 عدد';
+            itemsJsonInput.value = '';
+            return;
+        }
+
+        let html = '';
+        let totGross = 0;
+        let totTare = 0;
+        let totNet = 0;
+        let totPkgs = 0;
+
+        committedReceiptItems.forEach((item, idx) => {
+            totGross += item.gross_weight_kg;
+            totTare += item.total_tare_weight_kg;
+            totNet += item.net_weight_kg;
+            if (item.package_count) totPkgs += item.package_count;
+
+            const notesCombined = [item.condition_notes, item.remarks].filter(Boolean).join(' | ') || '—';
+            const priceFormatted = item.unit_price ? Number(item.unit_price).toLocaleString('fa-IR') + ' ریال' : '—';
+
+            html += `
+                <tr>
+                    <td class="tabular-nums" style="text-align: center;">${idx + 1}</td>
+                    <td><strong>${item.product_name}</strong></td>
+                    <td class="tabular-nums">${item.gross_weight_kg.toFixed(3)} kg</td>
+                    <td class="tabular-nums" style="color: #b91c1c;">-${item.total_tare_weight_kg.toFixed(3)} kg</td>
+                    <td class="tabular-nums" style="font-weight: 700; color: #15803d;">${item.net_weight_kg.toFixed(3)} kg</td>
+                    <td class="tabular-nums">${priceFormatted}</td>
+                    <td class="tabular-nums">${item.package_count ? item.package_count + ' عدد' : '—'}</td>
+                    <td style="font-size: 0.8rem; color: var(--text-muted);">${notesCombined}</td>
+                    <td style="text-align: center;">
+                        <button type="button" class="btn btn-danger btn-sm btn-del-receipt-item" data-idx="${idx}">×</button>
+                    </td>
+                </tr>
+            `;
+        });
+
+        committedBody.innerHTML = html;
+
+        grandGross.textContent = totGross.toFixed(3) + ' kg';
+        grandTare.textContent = '-' + totTare.toFixed(3) + ' kg';
+        grandNet.textContent = totNet.toFixed(3) + ' kg';
+        grandPkgs.textContent = totPkgs > 0 ? totPkgs + ' عدد' : '—';
+
+        btnSubmitReceipt.disabled = false;
+        itemsJsonInput.value = JSON.stringify(committedReceiptItems);
+
+        // Bind delete buttons
+        committedBody.querySelectorAll('.btn-del-receipt-item').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const i = parseInt(this.getAttribute('data-idx'));
+                committedReceiptItems.splice(i, 1);
+                renderCommittedReceiptTable();
+            });
+        });
+    }
+
+    renderCommittedReceiptTable();
+})();
+</script>
+{% endblock %}

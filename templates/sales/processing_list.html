@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% load jalali_tags %}
+
+{% block title %}اسناد تبدیل، خردایش و فرآوری | فروشگاه گوشت و مرغ{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
+        <div>
+            <h1 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main);">اسناد تبدیل و فرآوری لاشه به برش‌ها</h1>
+            <p style="font-size: 0.85rem; color: var(--text-muted);">
+                رهگیری عملیات قطعه‌بندی مرغ و گوشت، محاسبه راندمان استحصال و ثبت افت‌های مجاز و ضایعات
+            </p>
+        </div>
+        <a href="{% url 'processing_create' %}" class="btn btn-primary">
+            + ثبت عملیات تبدیل جدید
+        </a>
+    </div>
+
+    <div class="table-responsive">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>شماره سند</th>
+                    <th>تاریخ و ساعت</th>
+                    <th>وزن ورودی مصرفی</th>
+                    <th>وزن خروجی حاصله</th>
+                    <th>افت / مغایرت وزن</th>
+                    <th>بازدهی (Yield)</th>
+                    <th>وضعیت تراز</th>
+                    <th style="text-align: center; width: 130px;">عملیات</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in records %}
+                <tr>
+                    <td>
+                        <strong style="color: #1e3a8a;">{{ r.document_number }}</strong>
+                    </td>
+                    <td class="tabular-nums" style="font-size: 0.85rem; color: var(--text-muted); white-space: nowrap;">
+                        {{ r.date_time|jdatetime }}
+                    </td>
+                    <td class="tabular-nums" style="font-weight: 600;">
+                        {{ r.total_input_weight_kg|floatformat:3 }} kg
+                    </td>
+                    <td class="tabular-nums" style="color: #15803d; font-weight: 600;">
+                        {{ r.total_output_weight_kg|floatformat:3 }} kg
+                    </td>
+                    <td class="tabular-nums" style="color: #b91c1c;">
+                        {{ r.unexplained_variance_kg|floatformat:3 }} kg
+                    </td>
+                    <td class="tabular-nums" style="font-weight: 700; color: #1e3a8a;">
+                        {{ r.yield_percentage|floatformat:1 }} %
+                    </td>
+                    <td>
+                        {% if r.reconciliation_status == 'RECONCILED' %}
+                        <span class="status-badge status-active">تراز کامل</span>
+                        {% elif r.reconciliation_status == 'UNEXPLAINED_LOSS' %}
+                        <span class="status-badge status-inactive" style="background: #fef3c7; color: #92400e;">افت تبیین‌نشده</span>
+                        {% else %}
+                        <span class="status-badge status-inactive" style="background: #fee2e2; color: #991b1b;">مازاد غیرعادی</span>
+                        {% endif %}
+                    </td>
+                    <td style="text-align: center; white-space: nowrap;">
+                        <a href="{% url 'processing_detail' r.pk %}" class="btn btn-secondary btn-sm">
+                            مشاهده جزئیات
+                        </a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="8" style="text-align: center; padding: 2.5rem; color: var(--text-muted);">
+                        هنوز عملیات تبدیلی ثبت نشده است. 
+                        <a href="{% url 'processing_create' %}" class="btn btn-primary btn-sm" style="margin-right: 0.5rem;">+ ثبت اولین عملیات تبدیل</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

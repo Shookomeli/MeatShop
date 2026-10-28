@@ -1,0 +1,366 @@
+{% extends "base.html" %}
+{% load jalali_tags %}
+
+{% block title %}صدور فاکتور رسمی از اسناد مبدأ (رسید / حواله) | فروشگاه گوشت و مرغ{% endblock %}
+
+{% block extra_head %}
+<style>
+.tab-nav {
+    display: flex;
+    border-bottom: 2px solid var(--border-color);
+    margin-bottom: 1.5rem;
+    gap: 0.5rem;
+}
+
+.tab-btn {
+    padding: 0.65rem 1.25rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+    margin-bottom: -2px;
+}
+
+.tab-btn:hover {
+    color: var(--primary);
+}
+
+.tab-btn.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+}
+
+.tab-pane {
+    display: none;
+}
+
+.tab-pane.active {
+    display: block;
+}
+
+.source-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 0.75rem;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.source-card:hover {
+    border-color: #94a3b8;
+}
+
+.source-card.selected {
+    border-color: var(--primary);
+    background-color: #fffaf0;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="max-width: 1050px; margin: 0 auto;">
+    <div style="margin-bottom: 1.25rem;">
+        <a href="{% url 'invoice_list' %}" style="color: var(--text-muted); font-size: 0.85rem; text-decoration: none;">
+            ← بازگشت به فهرست فاکتورها
+        </a>
+        <h1 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main); margin-top: 0.35rem;">
+            صدور فاکتور رسمی از اسناد مبدأ انبار
+        </h1>
+        <p style="font-size: 0.85rem; color: var(--text-muted);">
+            اتصال رسمی اسناد حواله خروج (فاکتور فروش) یا رسید ورود (فاکتور خرید) بدون دستکاری یا کسر مضاعف موجودی انبار.
+        </p>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="tab-nav">
+        <button type="button" class="tab-btn {% if active_tab != 'purchase' %}active{% endif %}" data-target="tab-sales">
+            📤 فاکتور فروش (از حواله‌های خروج کالا)
+            <span style="font-size: 0.75rem; background: #fee2e2; color: #991b1b; padding: 0.1rem 0.45rem; border-radius: 10px; margin-right: 0.35rem;">
+                {{ uninvoiced_issues.count }}
+            </span>
+        </button>
+        <button type="button" class="tab-btn {% if active_tab == 'purchase' %}active{% endif %}" data-target="tab-purchase">
+            📥 فاکتور خرید (از رسیدهای ورود کالا)
+            <span style="font-size: 0.75rem; background: #e0f2fe; color: #0369a1; padding: 0.1rem 0.45rem; border-radius: 10px; margin-right: 0.35rem;">
+                {{ uninvoiced_receipts.count }}
+            </span>
+        </button>
+    </div>
+
+    <!-- Tab 1: Sales Invoices from Goods Issues -->
+    <div id="tab-sales" class="tab-pane {% if active_tab != 'purchase' %}active{% endif %}">
+        <form method="POST">
+            {% csrf_token %}
+            <input type="hidden" name="source_type" value="SALE">
+            <input type="hidden" name="idempotency_key" class="source-idemp">
+
+            <div style="background-color: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; margin-bottom: 1.25rem;">
+                <h2 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 1rem; color: var(--text-main);">
+                    ۱. مشخصات فاکتور فروش
+                </h2>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem;">
+                    <div class="form-group">
+                        <label class="form-label">صاحب کالا / فروشنده <span style="color: var(--danger);">*</span></label>
+                        <input type="text" name="goods_owner_name" class="form-input" value="فروشگاه مرکزی پروتئین" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">خریدار / مشتری</label>
+                        <input type="text" name="buyer_or_supplier_name" class="form-input" placeholder="در صورت خالی بودن، از حواله خوانده می‌شود">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">راننده / حمل‌کننده</label>
+                        <input type="text" name="driver_name" class="form-input" placeholder="اختیاری">
+                    </div>
+                    <div class="form-group" style="grid-column: span 3;">
+                        <label class="form-label">ملاحظات و توضیحات فاکتور</label>
+                        <input type="text" name="remarks" class="form-input" placeholder="یادداشت‌های مالی، شماره حساب، شرایط تسویه...">
+                    </div>
+                </div>
+            </div>
+
+            <!-- List of Un-invoiced Goods Issues -->
+            <div style="background-color: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; margin-bottom: 1.5rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h2 style="font-size: 1.05rem; font-weight: 700; color: var(--text-main);">
+                        ۲. انتخاب حواله‌های خروج جهت صدور فاکتور
+                    </h2>
+                    <span style="font-size: 0.8rem; color: var(--text-muted);">
+                        می‌توانید یک یا چند حواله مربوط به یک مشتری را همزمان فاکتور کنید.
+                    </span>
+                </div>
+
+                {% for iss in uninvoiced_issues %}
+                <div class="source-card">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem;">
+                        <div style="display: flex; gap: 0.75rem; align-items: flex-start;">
+                            <input type="checkbox" name="selected_issues" value="{{ iss.id }}" id="iss-chk-{{ iss.id }}" style="margin-top: 0.35rem; width: 1.1rem; height: 1.1rem; cursor: pointer;">
+                            <div>
+                                <label for="iss-chk-{{ iss.id }}" style="cursor: pointer; font-weight: 700; font-size: 1rem; color: #991b1b;" class="tabular-nums">
+                                    {{ iss.document_number }}
+                                </label>
+                                <span style="font-size: 0.8rem; color: var(--text-muted); margin-right: 0.5rem;" class="tabular-nums">
+                                    {{ iss.date_time|jdatetime }}
+                                </span>
+                                <div style="font-size: 0.9rem; margin-top: 0.25rem;">
+                                    <strong>خریدار:</strong> {{ iss.recipient_name }}
+                                    {% if iss.destination_address %} | <strong>مقصد:</strong> {{ iss.destination_address }}{% endif %}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="text-align: left;">
+                            <div style="font-size: 1rem; font-weight: 700; color: #15803d;" class="tabular-nums">
+                                {{ iss.aggregate_net_weight|format_weight_kg }}
+                            </div>
+                            <div style="font-size: 0.85rem; color: var(--text-muted);" class="tabular-nums">
+                                {% if iss.aggregate_total_amount %}
+                                    {{ iss.aggregate_total_amount|toman_display }}
+                                {% else %}
+                                    بدون ثبت قیمت در حواله
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Cut breakdown in this issue -->
+                    <div style="margin-top: 0.75rem; padding-top: 0.5rem; border-top: 1px dashed var(--border-subtle); font-size: 0.82rem; color: var(--text-muted);">
+                        {% if iss.items.exists %}
+                            <strong>اقلام موجود:</strong>
+                            {% for item in iss.items.all %}
+                                {{ item.product.name }} ({{ item.net_weight_kg|format_weight_kg }}){% if not forloop.last %} • {% endif %}
+                            {% endfor %}
+                        {% elif iss.product %}
+                            <strong>کالا:</strong> {{ iss.product.name }} ({{ iss.aggregate_net_weight|format_weight_kg }})
+                        {% endif %}
+                    </div>
+                </div>
+                {% empty %}
+                <div style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                    هیچ حواله خروج فاکتور‌نشده‌ای در سیستم وجود ندارد.
+                </div>
+                {% endfor %}
+
+                {% if uninvoiced_issues.exists %}
+                <div style="display: flex; justify-content: flex-end; margin-top: 1.25rem;">
+                    <button type="submit" class="btn btn-primary" style="padding: 0.6rem 1.75rem;">
+                        ✓ صدور فاکتور فروش رسمی از حواله‌های انتخابی
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Tab 2: Purchase Invoices from Goods Receipts -->
+    <div id="tab-purchase" class="tab-pane {% if active_tab == 'purchase' %}active{% endif %}">
+        <form method="POST">
+            {% csrf_token %}
+            <input type="hidden" name="source_type" value="PURCHASE">
+            <input type="hidden" name="idempotency_key" class="source-idemp">
+
+            <div style="background-color: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; margin-bottom: 1.25rem;">
+                <h2 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 1rem; color: var(--text-main);">
+                    ۱. مشخصات فاکتور خرید
+                </h2>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem;">
+                    <div class="form-group">
+                        <label class="form-label">خریدار / تحویل‌گیرنده <span style="color: var(--danger);">*</span></label>
+                        <input type="text" name="goods_owner_name" class="form-input" value="فروشگاه مرکزی پروتئین" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">تأمین‌کننده / فروشنده</label>
+                        <input type="text" name="buyer_or_supplier_name" class="form-input" placeholder="در صورت خالی بودن، از رسید خوانده می‌شود">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">راننده / تحویل‌دهنده</label>
+                        <input type="text" name="driver_name" class="form-input" placeholder="اختیاری">
+                    </div>
+                    <div class="form-group" style="grid-column: span 3;">
+                        <label class="form-label">ملاحظات و توضیحات فاکتور خرید</label>
+                        <input type="text" name="remarks" class="form-input" placeholder="شرایط پرداخت به کشتارگاه، شماره حواله بانکی...">
+                    </div>
+                </div>
+            </div>
+
+            <!-- List of Un-invoiced Goods Receipts -->
+            <div style="background-color: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; margin-bottom: 1.5rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <h2 style="font-size: 1.05rem; font-weight: 700; color: var(--text-main);">
+                        ۲. انتخاب رسیدهای ورود کالا و تعیین قطعی قیمت خرید
+                    </h2>
+                </div>
+                <div style="margin-bottom: 1rem; padding: 0.6rem 0.85rem; background: #fffbeb; border: 1px solid #fef3c7; border-radius: 6px; font-size: 0.82rem; color: #92400e;">
+                    💡 <strong>قانون حسابداری:</strong> در فرم رسید ورود، قیمت کالا ثبت نمی‌شود. هنگام صدور فاکتور خرید، ورود قیمت خرید به ریال برای هر رسید انتخابی <strong>الزامی</strong> است.
+                </div>
+
+                {% for rec in uninvoiced_receipts %}
+                <div class="source-card">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap;">
+                        <div style="display: flex; gap: 0.75rem; align-items: flex-start;">
+                            <input type="checkbox" name="selected_receipts" value="{{ rec.id }}" id="rec-chk-{{ rec.id }}" style="margin-top: 0.35rem; width: 1.1rem; height: 1.1rem; cursor: pointer;">
+                            <div>
+                                <label for="rec-chk-{{ rec.id }}" style="cursor: pointer; font-weight: 700; font-size: 1rem; color: #1e3a8a;" class="tabular-nums">
+                                    {{ rec.document_number }}
+                                </label>
+                                <span style="font-size: 0.8rem; color: var(--text-muted); margin-right: 0.5rem;" class="tabular-nums">
+                                    {{ rec.date_time|jdatetime }}
+                                </span>
+                                <div style="font-size: 0.9rem; margin-top: 0.25rem;">
+                                    <strong>تأمین‌کننده:</strong> {{ rec.supplier_name }}
+                                    {% if rec.supplier_document_ref %} | بارنامه: {{ rec.supplier_document_ref }}{% endif %}
+                                </div>
+                                <div style="font-size: 0.85rem; color: var(--text-main); margin-top: 0.2rem;">
+                                    {% if rec.items.exists %}
+                                        <strong>اقلام کالا ({{ rec.items.count }} قلم):</strong>
+                                        <ul style="margin: 0.25rem 0 0 1rem; padding: 0; font-size: 0.8rem; color: var(--text-muted);">
+                                            {% for itm in rec.items.all %}
+                                            <li>{{ itm.product.name }} ({{ itm.net_weight_kg|format_weight_kg }})</li>
+                                            {% endfor %}
+                                        </ul>
+                                    {% else %}
+                                        <strong>کالا:</strong> {{ rec.primary_product_name }} {% if rec.product %}({{ rec.product.category.name }}){% endif %}
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Price Entry for this Receipt -->
+                        <div style="background: #f8fafc; border: 1px solid var(--border-color); border-radius: 6px; padding: 0.75rem 1rem; min-width: 280px;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.35rem; font-size: 0.85rem;">
+                                <span>مجموع وزن خالص ورودی:</span>
+                                <strong class="tabular-nums" style="color: #15803d;">{{ rec.aggregate_net_weight|format_weight_kg }}</strong>
+                            </div>
+                            {% if rec.items.exists %}
+                                {% for itm in rec.items.all %}
+                                <div class="form-group" style="margin-bottom: 0.35rem; border-top: 1px dashed var(--border-subtle); padding-top: 0.35rem;">
+                                    <label class="form-label" style="font-size: 0.78rem; margin-bottom: 0.15rem;">
+                                        قیمت خرید «{{ itm.product.name }}» به ریال: <span style="color: var(--danger);">*</span>
+                                    </label>
+                                    <input type="number" name="unit_price_rial_{{ itm.id }}" class="form-input purchase-price-input" placeholder="ریال" min="1" dir="ltr" style="font-size: 0.85rem; font-weight: 600;">
+                                    <span class="toman-calc" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-top: 2px;"></span>
+                                </div>
+                                {% endfor %}
+                            {% else %}
+                                <div class="form-group" style="margin-bottom: 0.25rem;">
+                                    <label class="form-label" style="font-size: 0.8rem; margin-bottom: 0.2rem;">
+                                        قیمت خرید هر کیلو به ریال: <span style="color: var(--danger);">*</span>
+                                    </label>
+                                    <input type="number" name="unit_price_rial_{{ rec.id }}" class="form-input purchase-price-input" placeholder="ریال" min="1" dir="ltr" style="font-size: 0.9rem; font-weight: 600;">
+                                    <span class="toman-calc" style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-top: 2px;"></span>
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% empty %}
+                <div style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                    هیچ رسید ورود فاکتور‌نشده‌ای در سیستم وجود ندارد.
+                </div>
+                {% endfor %}
+
+                {% if uninvoiced_receipts.exists %}
+                <div style="display: flex; justify-content: flex-end; margin-top: 1.25rem;">
+                    <button type="submit" class="btn btn-primary" style="padding: 0.6rem 1.75rem;">
+                        ✓ صدور فاکتور خرید رسمی از رسیدهای انتخابی
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function() {
+    // Tab switching
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    const tabPanes = document.querySelectorAll('.tab-pane');
+
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', function() {
+            const targetId = this.getAttribute('data-target');
+            tabBtns.forEach(b => b.classList.remove('active'));
+            tabPanes.forEach(p => p.classList.remove('active'));
+            this.classList.add('active');
+            const targetPane = document.getElementById(targetId);
+            if (targetPane) targetPane.classList.add('active');
+        });
+    });
+
+    // Populate idempotency keys
+    document.querySelectorAll('.source-idemp').forEach(inp => {
+        inp.value = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : ('idemp-src-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9));
+    });
+
+    // Card selection highlight
+    document.querySelectorAll('.source-card input[type="checkbox"]').forEach(chk => {
+        chk.addEventListener('change', function() {
+            const card = this.closest('.source-card');
+            if (this.checked) {
+                card.classList.add('selected');
+            } else {
+                card.classList.remove('selected');
+            }
+        });
+    });
+
+    // Toman helper on purchase price inputs
+    document.querySelectorAll('.purchase-price-input').forEach(inp => {
+        inp.addEventListener('input', function() {
+            const val = parseInt(this.value) || 0;
+            const helper = this.parentElement.querySelector('.toman-calc');
+            if (helper) {
+                helper.textContent = val > 0 ? `${(val / 10).toLocaleString()} تومان` : '';
+            }
+        });
+    });
+})();
+</script>
+{% endblock %}

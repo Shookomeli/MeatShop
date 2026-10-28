@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+
+{% block title %}گزارش جامع فروش و عملکرد مالی | فروشگاه گوشت و مرغ{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 2rem;">
+    <!-- Breadcrumb & Header -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
+        <div>
+            <a href="{% url 'reports_hub' %}" style="color: var(--text-muted); font-size: 0.85rem; text-decoration: none;">
+                ← بازگشت به مرکز گزارش‌ها
+            </a>
+            <h1 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main); margin-top: 0.35rem;">
+                گزارش عملکرد فروش و تفکیک درآمد
+            </h1>
+        </div>
+        <div>
+            <a href="{% url 'export_sales_csv' %}?start_date={{ start_date }}&end_date={{ end_date }}" class="btn btn-secondary">
+                📥 دانلود فایل اکسل (CSV)
+            </a>
+        </div>
+    </div>
+
+    <!-- Filter Form -->
+    <div style="background-color: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1.25rem;">
+        <form method="GET" action="{% url 'report_sales' %}" style="display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end;">
+            <div style="min-width: 140px;">
+                <label class="form-label" style="font-size: 0.8rem;">از تاریخ:</label>
+                <input type="date" name="start_date" value="{{ start_date }}" class="form-input" style="padding: 0.4rem 0.6rem; font-size: 0.85rem;" dir="ltr">
+            </div>
+
+            <div style="min-width: 140px;">
+                <label class="form-label" style="font-size: 0.8rem;">تا تاریخ:</label>
+                <input type="date" name="end_date" value="{{ end_date }}" class="form-input" style="padding: 0.4rem 0.6rem; font-size: 0.85rem;" dir="ltr">
+            </div>
+
+            <div style="flex: 1; min-width: 160px;">
+                <label class="form-label" style="font-size: 0.8rem;">نام خریدار / مشتری:</label>
+                <input type="text" name="buyer" value="{{ buyer }}" placeholder="جستجو بر اساس نام..." class="form-input" style="padding: 0.4rem 0.6rem; font-size: 0.85rem;">
+            </div>
+
+            <div style="min-width: 150px;">
+                <label class="form-label" style="font-size: 0.8rem;">دسته‌بندی کالا:</label>
+                <select name="category" class="form-select" style="padding: 0.4rem 0.6rem; font-size: 0.85rem;">
+                    <option value="">همه دسته‌بندی‌ها</option>
+                    {% for cat in categories %}
+                    <option value="{{ cat.slug }}" {% if selected_category == cat.slug %}selected{% endif %}>{{ cat.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div style="min-width: 160px;">
+                <label class="form-label" style="font-size: 0.8rem;">قطعه / کالا:</label>
+                <select name="product" class="form-select" style="padding: 0.4rem 0.6rem; font-size: 0.85rem;">
+                    <option value="">همه قطعات</option>
+                    {% for p in products %}
+                    <option value="{{ p.id }}" {% if selected_product == p.id|stringformat:"s" %}selected{% endif %}>{{ p.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div style="display: flex; gap: 0.5rem;">
+                <button type="submit" class="btn btn-primary" style="padding: 0.45rem 1rem;">فیلتر</button>
+                {% if start_date or end_date or buyer or selected_category or selected_product %}
+                <a href="{% url 'report_sales' %}" class="btn btn-secondary" style="color: var(--danger); padding: 0.45rem 0.75rem;">حذف</a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+
+    <!-- Summary Metrics -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem;">
+        <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 1rem; text-align: center;">
+            <div style="font-size: 0.85rem; color: #1e40af;">مجموع درآمد فروش (تومان)</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: #1e3a8a; margin-top: 0.25rem;" class="tabular-nums">
+                {{ total_revenue_toman|floatformat:0 }} تومان
+            </div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem;">
+                {{ total_revenue_rial|floatformat:0 }} ریال
+            </div>
+        </div>
+
+        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 1rem; text-align: center;">
+            <div style="font-size: 0.85rem; color: #166534;">کل وزن خالص فروخته‌شده</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: #15803d; margin-top: 0.25rem;" class="tabular-nums">
+                {{ total_sold_weight_kg|floatformat:3 }} kg
+            </div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem;">
+                بر مبنای اقلام فاکتورهای نهایی
+            </div>
+        </div>
+
+        <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1rem; text-align: center;">
+            <div style="font-size: 0.85rem; color: var(--text-muted);">تعداد فاکتورهای صادره</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: #1e293b; margin-top: 0.25rem;" class="tabular-nums">
+                {{ invoice_count }}
+            </div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem;">
+                اسناد مالی قطعی
+            </div>
+        </div>
+    </div>
+
+    <!-- Product Breakdown Table -->
+    <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem;">
+        <h2 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 0.75rem; color: var(--text-main);">
+            تفکیک فروش بر اساس قطعات و اقلام کالا
+        </h2>
+        <div class="table-responsive">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th style="width: 45px;">ردیف</th>
+                        <th>نام قطعه / کالا</th>
+                        <th>دسته‌بندی</th>
+                        <th>وزن فروخته‌شده (kg)</th>
+                        <th>تعداد معامله</th>
+                        <th>درآمد حاصله (تومان)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in product_stats %}
+                    <tr>
+                        <td class="tabular-nums" style="font-size: 0.8rem; color: var(--text-muted);">
+                            {{ forloop.counter }}
+                        </td>
+                        <td><strong>{{ row.product__name }}</strong></td>
+                        <td style="font-size: 0.85rem; color: var(--text-muted);">{{ row.product__category__name }}</td>
+                        <td class="tabular-nums" style="font-weight: 600;">
+                            {{ row.total_weight|floatformat:3 }} kg
+                        </td>
+                        <td class="tabular-nums" style="color: var(--text-muted);">
+                            {{ row.total_qty }}
+                        </td>
+                        <td class="tabular-nums" style="color: #15803d; font-weight: 700;">
+                            {{ row.total_revenue|default:0|floatformat:0 }} ریال
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="6" style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                            رکوردی متناسب با فیلترهای مشخص‌شده یافت نشد.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

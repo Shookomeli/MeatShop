@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% load jalali_tags %}
+
+{% block title %}فهرست فاکتورها | فروشگاه گوشت و مرغ{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
+        <div>
+            <h1 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main);">فاکتورهای رسمی (فروش و خرید)</h1>
+            <p style="font-size: 0.85rem; color: var(--text-muted);">
+                آرشیو رسمی اسناد فروش، فاکتورهای خرید، اسناد متصل به انبار و سوابق مالی
+            </p>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+            <a href="{% url 'invoice_from_source' %}" class="btn btn-secondary">
+                📄 صدور فاکتور از اسناد انبار
+            </a>
+            <a href="{% url 'invoice_create' %}" class="btn btn-primary">
+                + صدور دستی فاکتور
+            </a>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>شماره فاکتور</th>
+                    <th>نوع فاکتور</th>
+                    <th>تاریخ صدور</th>
+                    <th>طرف حساب / مشتری</th>
+                    <th>صاحب کالا</th>
+                    <th>راننده</th>
+                    <th>تعداد اقلام</th>
+                    <th>مبلغ کل</th>
+                    <th>وضعیت</th>
+                    <th style="text-align: center; width: 120px;">عملیات</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for inv in invoices %}
+                <tr>
+                    <td>
+                        <strong style="color: #1e3a8a;" class="tabular-nums">{{ inv.document_number }}</strong>
+                    </td>
+                    <td>
+                        <span class="status-badge {% if inv.invoice_type == 'PURCHASE' %}status-inactive{% else %}status-active{% endif %}" style="font-size: 0.75rem;">
+                            {{ inv.get_invoice_type_display }}
+                        </span>
+                    </td>
+                    <td class="tabular-nums" style="font-size: 0.85rem; color: var(--text-muted); white-space: nowrap;">
+                        {{ inv.date|jdate }}
+                    </td>
+                    <td>
+                        <strong>{{ inv.buyer_name }}</strong>
+                    </td>
+                    <td style="font-size: 0.85rem; color: var(--text-muted);">
+                        {{ inv.goods_owner_name }}
+                    </td>
+                    <td style="font-size: 0.85rem;">
+                        {{ inv.driver_name|default:"—" }}
+                    </td>
+                    <td class="tabular-nums" style="text-align: center;">
+                        {{ inv.items.count|fa_digits }}
+                    </td>
+                    <td class="tabular-nums" style="color: #15803d; font-weight: 800; font-size: 0.95rem;">
+                        {{ inv.total_amount_display }}
+                    </td>
+                    <td>
+                        {% if inv.status == 'CANCELLED' %}
+                            <span class="status-badge" style="background: #fee2e2; color: #991b1b; font-size: 0.75rem;">ابطال شده</span>
+                        {% else %}
+                            <span class="status-badge status-active" style="font-size: 0.75rem;">{{ inv.get_status_display }}</span>
+                        {% endif %}
+                    </td>
+                    <td style="text-align: center; white-space: nowrap;">
+                        <a href="{% url 'invoice_detail' inv.pk %}" class="btn btn-secondary btn-sm">
+                            🔍 مشاهده / چاپ
+                        </a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="10" style="text-align: center; padding: 2.5rem; color: var(--text-muted);">
+                        هنوز فاکتوری صادر نشده است. 
+                        <a href="{% url 'invoice_create' %}" class="btn btn-primary btn-sm" style="margin-right: 0.5rem;">+ صدور اولین فاکتور</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+
+{% block title %}
+    {% if is_edit %}ویرایش کالای {{ product.name }}{% else %}ثبت کالای جدید{% endif %} | فروشگاه گوشت
+{% endblock %}
+
+{% block content %}
+<div style="max-width: 680px; margin: 0 auto;">
+    <!-- Breadcrumb & Header -->
+    <div style="margin-bottom: 1.25rem;">
+        <a href="{% url 'product_list' %}" style="color: var(--text-muted); font-size: 0.85rem; text-decoration: none;">
+            ← بازگشت به فهرست کاتالوگ کالاها
+        </a>
+        <h1 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main); margin-top: 0.35rem;">
+            {% if is_edit %}ویرایش اطلاعات کالا: {{ product.name }}{% else %}ثبت کالای جدید در کاتالوگ فروشگاه{% endif %}
+        </h1>
+        <p style="font-size: 0.85rem; color: var(--text-muted);">
+            مشخصات قطعه یا برش گوشت را وارد کنید. کدهای کالا و قیمت‌ها اختیاری بوده و بعداً قابل تعیین می‌باشند.
+        </p>
+    </div>
+
+    <!-- Form Panel -->
+    <div style="background-color: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.5rem;">
+        <form method="POST">
+            {% csrf_token %}
+
+            {% if form.non_field_errors %}
+            <div class="alert alert-error">
+                {{ form.non_field_errors }}
+            </div>
+            {% endif %}
+
+            <!-- Product Name -->
+            <div class="form-group">
+                <label class="form-label" for="{{ form.name.id_for_label }}">
+                    {{ form.name.label }} <span style="color: var(--danger);">*</span>
+                </label>
+                {{ form.name }}
+                {% if form.name.errors %}
+                <div class="form-error">{{ form.name.errors|striptags }}</div>
+                {% endif %}
+            </div>
+
+            <!-- Category & Unit in 2-column Grid -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div class="form-group">
+                    <label class="form-label" for="{{ form.category.id_for_label }}">
+                        {{ form.category.label }} <span style="color: var(--danger);">*</span>
+                    </label>
+                    {{ form.category }}
+                    {% if form.category.errors %}
+                    <div class="form-error">{{ form.category.errors|striptags }}</div>
+                    {% endif %}
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="{{ form.unit.id_for_label }}">
+                        {{ form.unit.label }} <span style="color: var(--danger);">*</span>
+                    </label>
+                    {{ form.unit }}
+                    {% if form.unit.errors %}
+                    <div class="form-error">{{ form.unit.errors|striptags }}</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Code & Base Price in 2-column Grid -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div class="form-group">
+                    <label class="form-label" for="{{ form.code.id_for_label }}">
+                        {{ form.code.label }}
+                    </label>
+                    {{ form.code }}
+                    <span style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-top: 2px;">
+                        کد بارکد یا کد کوتاه عددی ترازوی فروشگاه
+                    </span>
+                    {% if form.code.errors %}
+                    <div class="form-error">{{ form.code.errors|striptags }}</div>
+                    {% endif %}
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="{{ form.price_per_unit_rial.id_for_label }}">
+                        {{ form.price_per_unit_rial.label }}
+                    </label>
+                    {{ form.price_per_unit_rial }}
+                    <span style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-top: 2px;">
+                        مبلغ پایه به ریال ذخیره می‌شود (۱ تومان = ۱۰ ریال)
+                    </span>
+                    {% if form.price_per_unit_rial.errors %}
+                    <div class="form-error">{{ form.price_per_unit_rial.errors|striptags }}</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Description -->
+            <div class="form-group">
+                <label class="form-label" for="{{ form.description.id_for_label }}">
+                    {{ form.description.label }}
+                </label>
+                {{ form.description }}
+                {% if form.description.errors %}
+                <div class="form-error">{{ form.description.errors|striptags }}</div>
+                {% endif %}
+            </div>
+
+            <!-- Is Active Checkbox -->
+            <div class="form-group" style="display: flex; align-items: center; gap: 0.5rem; background: var(--tag-bg); padding: 0.75rem; border-radius: 6px;">
+                {{ form.is_active }}
+                <label for="{{ form.is_active.id_for_label }}" style="font-size: 0.9rem; font-weight: 500; cursor: pointer;">
+                    {{ form.is_active.label }}
+                </label>
+            </div>
+
+            <!-- Form Actions -->
+            <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border-subtle);">
+                <a href="{% url 'product_list' %}" class="btn btn-secondary">
+                    انصراف
+                </a>
+                <button type="submit" class="btn btn-primary">
+                    {% if is_edit %}ذخیره تغییرات کالا{% else %}ثبت و افزودن کالا{% endif %}
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

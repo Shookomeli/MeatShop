@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}تحلیل راندمان و افت فرآوری لاشه | فروشگاه گوشت و مرغ{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 2rem;">
+    <!-- Header -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+        <div>
+            <a href="{% url 'reports_hub' %}" style="color: var(--text-muted); font-size: 0.85rem; text-decoration: none;">
+                ← بازگشت به مرکز گزارش‌ها
+            </a>
+            <h1 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main); margin-top: 0.35rem;">
+                تحلیل راندمان، بازدهی و افت قطعه‌بندی لاشه
+            </h1>
+        </div>
+    </div>
+
+    <!-- Filter Form -->
+    <div style="background-color: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1.25rem;">
+        <form method="GET" action="{% url 'report_processing' %}" style="display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap;">
+            <div>
+                <label class="form-label" style="font-size: 0.8rem;">از تاریخ:</label>
+                <input type="date" name="start_date" value="{{ start_date }}" class="form-input" style="padding: 0.4rem 0.6rem; font-size: 0.85rem;" dir="ltr">
+            </div>
+            <div>
+                <label class="form-label" style="font-size: 0.8rem;">تا تاریخ:</label>
+                <input type="date" name="end_date" value="{{ end_date }}" class="form-input" style="padding: 0.4rem 0.6rem; font-size: 0.85rem;" dir="ltr">
+            </div>
+            <button type="submit" class="btn btn-primary" style="padding: 0.45rem 1rem;">فیلتر</button>
+            {% if start_date or end_date %}
+            <a href="{% url 'report_processing' %}" class="btn btn-secondary" style="color: var(--danger); padding: 0.45rem 0.75rem;">حذف</a>
+            {% endif %}
+        </form>
+    </div>
+
+    <!-- KPI Summary Grid -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; text-align: center;">
+            <div style="font-size: 0.85rem; color: var(--text-muted);">مجموع ورودی لاشه‌ها</div>
+            <div style="font-size: 1.35rem; font-weight: 800; color: #1e293b; margin-top: 0.25rem;" class="tabular-nums">
+                {{ total_in|floatformat:3 }} kg
+            </div>
+        </div>
+
+        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; text-align: center;">
+            <div style="font-size: 0.85rem; color: var(--text-muted);">مجموع خروجی برش‌ها</div>
+            <div style="font-size: 1.35rem; font-weight: 800; color: #15803d; margin-top: 0.25rem;" class="tabular-nums">
+                {{ total_out|floatformat:3 }} kg
+            </div>
+        </div>
+
+        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; text-align: center;">
+            <div style="font-size: 0.85rem; color: var(--text-muted);">کل افت و کسری فرآوری</div>
+            <div style="font-size: 1.35rem; font-weight: 800; color: #b91c1c; margin-top: 0.25rem;" class="tabular-nums">
+                {{ total_loss|floatformat:3 }} kg
+            </div>
+        </div>
+
+        <div style="background: #eff6ff; border: 2px solid #bfdbfe; border-radius: 8px; padding: 1rem; text-align: center;">
+            <div style="font-size: 0.85rem; color: #1e40af; font-weight: 600;">میانگین راندمان (Yield)</div>
+            <div style="font-size: 1.45rem; font-weight: 800; color: #1e3a8a; margin-top: 0.25rem;" class="tabular-nums">
+                {{ avg_yield|floatformat:1 }} %
+            </div>
+        </div>
+    </div>
+
+    <!-- Operations Table -->
+    <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem;">
+        <h2 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 0.75rem; color: var(--text-main);">
+            سوابق عملیات‌های تبدیل و جزئیات تراز
+        </h2>
+        <div class="table-responsive">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>شماره سند</th>
+                        <th>تاریخ</th>
+                        <th>ورودی مصرفی (kg)</th>
+                        <th>خروجی استحصالی (kg)</th>
+                        <th>افت کل (kg)</th>
+                        <th>درصد بازدهی</th>
+                        <th>وضعیت تراز</th>
+                        <th style="text-align: center;">عملیات</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in records %}
+                    <tr>
+                        <td><strong>{{ r.document_number }}</strong></td>
+                        <td class="tabular-nums" style="font-size: 0.85rem; color: var(--text-muted);">
+                            {{ r.date_time|date:"Y/m/d" }}
+                        </td>
+                        <td class="tabular-nums">{{ r.total_input_weight_kg|floatformat:3 }}</td>
+                        <td class="tabular-nums" style="color: #15803d; font-weight: 600;">{{ r.total_output_weight_kg|floatformat:3 }}</td>
+                        <td class="tabular-nums" style="color: #b91c1c;">{{ r.unexplained_variance_kg|floatformat:3 }}</td>
+                        <td class="tabular-nums" style="font-weight: 700; color: #1e3a8a;">{{ r.yield_percentage|floatformat:1 }}%</td>
+                        <td>
+                            {% if r.reconciliation_status == 'RECONCILED' %}
+                            <span class="status-badge status-active">تراز کامل</span>
+                            {% elif r.reconciliation_status == 'UNEXPLAINED_LOSS' %}
+                            <span class="status-badge status-inactive" style="background: #fef3c7; color: #92400e;">افت تبیین‌نشده</span>
+                            {% else %}
+                            <span class="status-badge status-inactive" style="background: #fee2e2; color: #991b1b;">مازاد غیرعادی</span>
+                            {% endif %}
+                        </td>
+                        <td style="text-align: center;">
+                            <a href="{% url 'processing_detail' r.pk %}" class="btn btn-secondary btn-sm">جزئیات</a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="8" style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                            سندی در این بازه زمانی یافت نشد.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

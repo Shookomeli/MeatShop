@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+{% load jalali_tags %}
+
+{% block title %}{{ invoice.get_invoice_type_display }} شماره {{ invoice.document_number }} | واکا پروتئین{% endblock %}
+
+{% block extra_head %}
+<style>
+@page {
+    size: A5 portrait;
+    margin: 8mm;
+}
+
+@media print {
+    /* Hide navigation, buttons, and layout wrappers */
+    .top-navbar, .footer, .no-print, .messages-container {
+        display: none !important;
+    }
+    body, .main-container {
+        background: #ffffff !important;
+        color: #000000 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        font-size: 10pt !important;
+    }
+    .invoice-card {
+        border: 1px solid #333333 !important;
+        box-shadow: none !important;
+        padding: 6mm !important;
+        margin: 0 !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        page-break-after: avoid;
+    }
+    .invoice-card table {
+        border-color: #333333 !important;
+        font-size: 9.5pt !important;
+    }
+    .invoice-card th, .invoice-card td {
+        padding: 4px 6px !important;
+        border-color: #333333 !important;
+        color: #000000 !important;
+    }
+    .print-only {
+        display: block !important;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="max-width: 860px; margin: 0 auto;">
+    <!-- Action Bar (Hidden during print) -->
+    <div class="no-print" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.5rem;">
+        <a href="{% url 'invoice_list' %}" style="color: var(--text-muted); font-size: 0.85rem; text-decoration: none;">
+            ← بازگشت به فهرست فاکتورها
+        </a>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+            {% if invoice.status != 'CANCELLED' %}
+            <form method="POST" action="{% url 'invoice_cancel' invoice.pk %}" onsubmit="return confirm('آیا از ابطال این فاکتور اطمینان دارید؟ اسناد مبدأ متصل به آن آزاد خواهند شد.');" style="display: inline;">
+                {% csrf_token %}
+                <input type="hidden" name="cancellation_reason" value="ابطال از پنل کاربری">
+                <button type="submit" class="btn btn-danger btn-sm">
+                    ❌ ابطال فاکتور
+                </button>
+            </form>
+            {% endif %}
+            <button onclick="window.print()" class="btn btn-primary btn-sm">
+                🖨️ چاپ فاکتور (A5)
+            </button>
+            <a href="{% url 'invoice_create' %}" class="btn btn-secondary btn-sm">
+                + صدور فاکتور جدید
+            </a>
+        </div>
+    </div>
+
+    {% if invoice.status == 'CANCELLED' %}
+    <div class="no-print" style="margin-bottom: 1rem; padding: 0.75rem 1rem; background: #fee2e2; border: 1px solid #fca5a5; border-radius: 6px; color: #991b1b; font-size: 0.9rem; font-weight: 600;">
+        ⚠️ توجه: این فاکتور ابطال گردیده و از محاسبات مالی خارج شده است. اسناد انبار مربوطه آزاد هستند.
+    </div>
+    {% endif %}
+
+    <!-- Official Printable Invoice Sheet (Standardized to A5) -->
+    <div class="invoice-card" style="background-color: var(--bg-surface); border: 2px solid var(--border-color); border-radius: 8px; padding: 1.5rem;">
+        <!-- Header -->
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1rem;">
+            <div>
+                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+                    <h1 style="font-size: 1.3rem; font-weight: 800; color: var(--primary);">
+                        واکا پروتئین (Vaka Protein)
+                    </h1>
+                    <span class="status-badge {% if invoice.invoice_type == 'PURCHASE' %}status-inactive{% else %}status-active{% endif %}" style="font-size: 0.8rem;">
+                        {{ invoice.get_invoice_type_display }}
+                    </span>
+                    {% if invoice.status == 'CANCELLED' %}
+                    <span class="status-badge" style="background: #fee2e2; color: #991b1b; font-size: 0.8rem;">
+                        ابطال شده
+                    </span>
+                    {% endif %}
+                </div>
+                <div style="font-size: 0.85rem; color: var(--text-muted);">
+                    فاکتور رسمی و سند تسویه مالی | صاحب کالا: {{ invoice.goods_owner_name|default:"واکا پروتئین" }}
+                </div>
+            </div>
+            <div style="text-align: left;">
+                <div style="font-size: 0.8rem; color: var(--text-muted);">شماره فاکتور:</div>
+                <strong style="font-size: 1.15rem; color: #1e3a8a;" class="tabular-nums">{{ invoice.document_number }}</strong>
+                <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">
+                    تاریخ: <span class="tabular-nums">{{ invoice.date|jdate }}</span>
+                </div>
+                {% if invoice.operator_name or invoice.operator %}
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem;">
+                    متصدی: <strong>{% if invoice.operator_name %}{{ invoice.operator_name }}{% elif invoice.operator %}{{ invoice.operator.username }}{% else %}متصدی فروش{% endif %}</strong>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Party Information -->
+        <div style="background: #f8fafc; border: 1px solid var(--border-subtle); border-radius: 6px; padding: 0.85rem 1rem; margin-bottom: 1.25rem; display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; font-size: 0.9rem;">
+            <div>
+                <span style="color: var(--text-muted);">
+                    {% if invoice.invoice_type == 'PURCHASE' %}تأمین‌کننده / فروشنده:{% else %}خریدار / مشتری:{% endif %}
+                </span>
+                <strong style="color: var(--text-main); margin-right: 0.35rem;">{{ invoice.buyer_name|default:"مشتری متفرقه" }}</strong>
+            </div>
+            <div>
+                <span style="color: var(--text-muted);">راننده / تحویل‌دهنده:</span>
+                <span style="margin-right: 0.35rem;">{{ invoice.driver_name|default:"تحویل حضوری" }}</span>
+            </div>
+
+            <!-- Traceability Links to Source Documents -->
+            {% if invoice.source_issues.exists %}
+            <div style="grid-column: span 2; font-size: 0.85rem;">
+                <span style="color: var(--text-muted);">حواله‌های خروج متناظر:</span>
+                {% for iss in invoice.source_issues.all %}
+                    <a href="{% url 'issue_detail' iss.pk %}" style="color: #991b1b; font-weight: 600; text-decoration: none; margin-right: 0.25rem;" class="tabular-nums">{{ iss.document_number }}</a>{% if not forloop.last %}، {% endif %}
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if invoice.source_receipts.exists %}
+            <div style="grid-column: span 2; font-size: 0.85rem;">
+                <span style="color: var(--text-muted);">رسیدهای ورود متناظر:</span>
+                {% for rec in invoice.source_receipts.all %}
+                    <a href="{% url 'receipt_detail' rec.pk %}" style="color: #1e3a8a; font-weight: 600; text-decoration: none; margin-right: 0.25rem;" class="tabular-nums">{{ rec.document_number }}</a>{% if not forloop.last %}، {% endif %}
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if invoice.remarks %}
+            <div style="grid-column: span 2;">
+                <span style="color: var(--text-muted);">ملاحظات:</span>
+                <span style="margin-right: 0.35rem;">{{ invoice.remarks }}</span>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Line Items Table -->
+        <div class="table-responsive" style="margin-bottom: 1.25rem;">
+            <table class="data-table" style="font-size: 0.9rem;">
+                <thead>
+                    <tr>
+                        <th style="width: 45px; text-align: center;">ردیف</th>
+                        <th>شرح کالا / قطعه گوشت</th>
+                        <th style="width: 105px; min-width: 95px; text-align: center;">تعداد</th>
+                        <th style="width: 120px; text-align: center;">وزن خالص</th>
+                        <th style="width: 150px; text-align: left;">قیمت واحد</th>
+                        <th style="width: 160px; text-align: left;">مبلغ کل (تومان)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in invoice.items.all %}
+                    <tr>
+                        <td class="tabular-nums" style="text-align: center; color: var(--text-muted); font-size: 0.8rem;">
+                            {{ forloop.counter }}
+                        </td>
+                        <td>
+                            <strong>{{ item.product_name_snapshot }}</strong>
+                            {% if item.source_issue_item %}
+                            <div style="font-size: 0.72rem; color: var(--text-muted);">
+                                حواله: {{ item.source_issue_item.goods_issue.document_number }}
+                            </div>
+                            {% elif item.source_receipt %}
+                            <div style="font-size: 0.72rem; color: var(--text-muted);">
+                                رسید: {{ item.source_receipt.document_number }}
+                            </div>
+                            {% endif %}
+                        </td>
+                        <td class="tabular-nums" style="text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums;">
+                            {{ item.quantity|fa_digits }}
+                        </td>
+                        <td class="tabular-nums" style="text-align: center; font-weight: 600;">
+                            {{ item.net_weight_kg|format_weight_kg }}
+                        </td>
+                        <td class="tabular-nums" style="text-align: left; font-size: 0.85rem;">
+                            {{ item.unit_price_display }}
+                        </td>
+                        <td class="tabular-nums" style="text-align: left; font-weight: 700; color: #1e3a8a;">
+                            {{ item.total_price_display }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Grand Total Summary -->
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 2rem;">
+            <div style="background: #eff6ff; border: 2px solid #bfdbfe; border-radius: 8px; padding: 1rem 1.5rem; text-align: left; min-width: 320px;">
+                <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.4rem;">
+                    <span>مبلغ به ریال:</span>
+                    <strong class="tabular-nums">{{ invoice.total_amount_rial|fa_digits }} ریال</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 1.25rem; font-weight: 800; color: #15803d; border-top: 1px solid #93c5fd; padding-top: 0.5rem;">
+                    <span>مبلغ نهایی (تومان):</span>
+                    <strong class="tabular-nums">{{ invoice.total_amount_display }}</strong>
+                </div>
+            </div>
+        </div>
+
+        <!-- Signatures Footer -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; border-top: 1px dashed var(--border-color); padding-top: 1.5rem; text-align: center; font-size: 0.85rem; color: var(--text-muted);">
+            <div>
+                امضای صادرکننده
+                <div style="height: 50px;"></div>
+            </div>
+            <div>
+                امضای راننده / تحویل‌دهنده
+                <div style="height: 50px;"></div>
+            </div>
+            <div>
+                امضای تحویل‌گیرنده / خریدار
+                <div style="height: 50px;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

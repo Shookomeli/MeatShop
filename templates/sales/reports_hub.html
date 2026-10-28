@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}مرکز گزارش‌ها، تحلیل داده‌ها و آمار | فروشگاه گوشت و مرغ{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 2rem;">
+    <!-- Header -->
+    <div style="margin-bottom: 1.5rem;">
+        <h1 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main);">
+            📊 مرکز گزارش‌ها، ممیزی و تحلیل داده‌ها
+        </h1>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.2rem;">
+            داشبورد نظارتی فروش، موجودی، راندمان فرآوری و دریافت خروجی استاندارد برای نرم‌افزارهای حسابداری و اکسل
+        </p>
+    </div>
+
+    <!-- KPI Metric Cards Grid -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+        <!-- Card 1: Total Sales -->
+        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem;">
+            <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.35rem;">مجموع فروش ثبتی (تومان)</div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: #15803d;" class="tabular-nums">
+                {{ total_sales_toman|floatformat:0 }} تومان
+            </div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
+                {{ total_sales_rial|floatformat:0 }} ریال در {{ total_invoices_count }} فاکتور
+            </div>
+        </div>
+
+        <!-- Card 2: Current Inventory -->
+        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem;">
+            <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.35rem;">کل وزن موجودی انبار</div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: #1e3a8a;" class="tabular-nums">
+                {{ total_stock_kg|floatformat:3 }} kg
+            </div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
+                موازنه بر مبنای دفتر کل گردش انبار
+            </div>
+        </div>
+
+        <!-- Card 3: Receipts & Issues -->
+        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem;">
+            <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.35rem;">اسناد انبارداری</div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: #7c2d12;" class="tabular-nums">
+                {{ total_receipts_count }} <span style="font-size: 0.9rem; font-weight: 500;">رسید</span> / {{ total_issues_count }} <span style="font-size: 0.9rem; font-weight: 500;">حواله</span>
+            </div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
+                اسناد رسمی با تفکیک پارسنگ
+            </div>
+        </div>
+
+        <!-- Card 4: Parent Meat Categories -->
+        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem;">
+            <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.35rem;">تراز ۴ دسته والد انبار</div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: #075985;" class="tabular-nums">
+                {{ parent_balances|length }} <span style="font-size: 0.9rem; font-weight: 500;">دسته والد</span>
+            </div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
+                مرغ، گوسفندی، گوساله، بوقلمون
+            </div>
+        </div>
+    </div>
+
+    <!-- Reports Navigation Grid -->
+    <h2 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 1rem; color: var(--text-main);">
+        دسترسی به گزارش‌های تخصصی و خروجی‌ها
+    </h2>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem;">
+        <!-- Report 1: Sales -->
+        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.5rem; display: flex; flex-direction: column; justify-content: space-between;">
+            <div>
+                <div style="font-size: 1.1rem; font-weight: 700; color: var(--primary); margin-bottom: 0.35rem;">
+                    📈 گزارش فروش و عملکرد مالی
+                </div>
+                <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 1rem;">
+                    تفکیک مبالغ و اوزان فروش بر اساس بازه زمانی، نام خریدار، دسته‌بندی و قطعات پرفروش، به همراه امکان دانلود مستقیم اکسل (CSV).
+                </p>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+                <a href="{% url 'report_sales' %}" class="btn btn-primary btn-sm" style="flex: 1;">مشاهده گزارش</a>
+                <a href="{% url 'export_sales_csv' %}" class="btn btn-secondary btn-sm" title="دانلود فایل اکسل">📥 خروجی CSV</a>
+            </div>
+        </div>
+
+        <!-- Report 2: Inventory -->
+        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.5rem; display: flex; flex-direction: column; justify-content: space-between;">
+            <div>
+                <div style="font-size: 1.1rem; font-weight: 700; color: #1e3a8a; margin-bottom: 0.35rem;">
+                    📦 ممیزی و موازنه موجودی انبار
+                </div>
+                <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 1rem;">
+                    گزارش جامع موجودی انبار به تفکیک ۴ دسته اصلی، شناسایی اقلام دارای کسری یا مازاد، و استخراج کاردکس انبارداری.
+                </p>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+                <a href="{% url 'report_inventory' %}" class="btn btn-primary btn-sm" style="flex: 1;">مشاهده گزارش</a>
+                <a href="{% url 'export_inventory_csv' %}" class="btn btn-secondary btn-sm" title="دانلود فایل اکسل">📥 خروجی CSV</a>
+            </div>
+        </div>
+
+        <!-- Report 3: Loss & Yield Report -->
+        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.5rem; display: flex; flex-direction: column; justify-content: space-between;">
+            <div>
+                <div style="font-size: 1.1rem; font-weight: 700; color: #0f766e; margin-bottom: 0.35rem;">
+                    🥩 گزارش افت، بازدهی و تراز لاشه‌ها
+                </div>
+                <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 1rem;">
+                    محاسبه خودکار افت وزن، راندمان تحویل قطعات و تفکیک برش‌های خروجی در برابر گوشت ورودی در بازه‌های زمانی مختلف.
+                </p>
+            </div>
+            <div>
+                <a href="{% url 'report_loss' %}" class="btn btn-primary btn-sm" style="width: 100%;">مشاهده گزارش افت و بازدهی</a>
+            </div>
+        </div>
+
+        <!-- Report 4: Tare Analysis -->
+        <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.5rem; display: flex; flex-direction: column; justify-content: space-between;">
+            <div>
+                <div style="font-size: 1.1rem; font-weight: 700; color: #854d0e; margin-bottom: 0.35rem;">
+                    ⚖️ گزارش مصرف و تحلیل پارسنگ ظروف
+                </div>
+                <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 1rem;">
+                    آمار فراوانی استفاده از انواع سبدها، قلاب‌ها و پالت‌ها، و مجموع اوزان پارسنگ کسرشده در عملیات توزین فروشگاه.
+                </p>
+            </div>
+            <div>
+                <a href="{% url 'report_tare' %}" class="btn btn-primary btn-sm" style="width: 100%;">مشاهده آمار پارسنگ</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

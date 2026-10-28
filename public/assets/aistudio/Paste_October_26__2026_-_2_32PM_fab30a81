@@ -1,0 +1,627 @@
+# MeatShop Project — Required Business Logic, Inventory, UI, and Reporting Revisions
+
+You are working on the existing MeatShop Django project for **Vaka Protein (واکا پروتئین)**.
+
+Your task is to inspect the current codebase and implement the following business and UI changes in the existing project.
+
+## 1. Mandatory Rules Before Making Changes
+
+1. Inspect the entire existing project structure before modifying anything.
+2. Read the README, project plan, models, services, views, forms, templates, URLs, tests, migrations, and existing inventory logic.
+3. Identify how the current implementation differs from the requirements below.
+4. Preserve the existing architecture and working functionality wherever possible.
+5. Do not rewrite the project from scratch or introduce unnecessary dependencies, Django apps, services, or abstractions.
+6. Follow the project's existing phase-based development approach. Implement and verify the changes incrementally.
+7. Do not move to unrelated future phases or implement real weighing-scale hardware integration as part of these changes.
+8. Do not delete existing customer data or reset the database.
+9. Create proper Django migrations whenever model changes are required.
+10. Add or update automated tests in the same phase as each feature.
+11. Run the relevant tests after each change and run the full test suite at the end.
+12. Do not report a feature as completed unless its implementation and verification support that claim.
+
+If the current project structure conflicts with a requirement, explain the conflict and choose the smallest safe change that satisfies the business requirement.
+
+---
+
+## 2. Company Identity and Branding
+
+The application is being developed for **Vaka Protein (واکا پروتئین)**.
+
+Update company-related names and branding wherever appropriate, including:
+
+- Application headers and page titles.
+- Login page, if applicable.
+- Printable invoices and receipts.
+- Report headers.
+- Relevant README sections and user-facing labels.
+
+Use the Persian company name `واکا پروتئین` in Persian-facing interfaces and printouts.
+
+Do not rename internal Python packages, database tables, or unrelated technical identifiers unless necessary.
+
+---
+
+## 3. Invoice and Receipt Dates
+
+Invoice and receipt dates must support both automatic and manual entry.
+
+Requirements:
+
+- Default the date to the current local date, using the project's configured Tehran timezone.
+- Allow authorized users to manually select or enter a different date.
+- Support backdated invoices and receipts because documents may be entered into the application after their actual issue date.
+- Do not force the business document date to equal the record creation timestamp.
+- Keep the actual record creation timestamp separately if the existing data model supports it.
+- Validate dates and provide clear Persian validation messages.
+- Display dates consistently throughout the application and on printed documents.
+- Preserve the existing date conventions unless they need to be adjusted for consistency.
+
+If invoices and inventory receipts use different models or forms, apply the appropriate behavior to both.
+
+Add tests for default dates, manually selected dates, past dates, and invalid dates.
+
+---
+
+## 4. Operator / Clerk Selection
+
+The operator (متصدی) field must support both predefined selection and manual entry.
+
+Preferred implementation:
+
+- Provide a selectable list of three predefined operators.
+- Allow an operator's name to be entered manually when necessary.
+- Avoid requiring a code change every time the list of operators changes.
+- Prefer a simple configurable solution consistent with the current architecture.
+- If a suitable settings or configuration mechanism already exists, reuse it.
+- Otherwise, choose the simplest maintainable approach, such as a small operator model or configurable list, based on how the existing project stores business data.
+
+The field should be easy to use in the invoice and receipt workflows.
+
+Validation must prevent empty operator names when the field is required, while allowing legitimate manually entered names.
+
+Do not invent the actual names of the three operators. Use the existing data if available; otherwise, provide a straightforward way for the customer to configure them.
+
+Add tests for predefined operators, custom operator names, and validation.
+
+---
+
+## 5. Standardize All Printing to A5
+
+All printable documents must use **A5 paper size**.
+
+Inspect every print-related template, including:
+
+- Invoices.
+- Inventory receipts.
+- Inventory issue documents.
+- Other existing printable forms and reports.
+
+Requirements:
+
+- Configure the print stylesheet using A5 page dimensions.
+- Use appropriate print margins and content widths.
+- Ensure tables, Persian text, numbers, totals, signatures, and company branding fit within the printable area.
+- Prevent unnecessary blank pages, clipped columns, overlapping elements, and broken totals.
+- Use proper right-to-left layout for Persian documents.
+- Hide interactive controls, navigation, and buttons when printing.
+- Keep the screen layout usable independently of the print layout.
+
+Use CSS `@page` with `size: A5` and appropriate print-specific styles.
+
+Do not assume that changing only the CSS page size fixes every document. Review each print template individually.
+
+Add or update print-layout checks where practical.
+
+---
+
+## 6. Fix Missing Validation Errors in Inventory Entry and Exit Views
+
+Currently, when a required field is empty in the inventory entry or exit forms, the user may click Submit, the page reloads, and the form resets without explaining what went wrong.
+
+This behavior must be fixed.
+
+Requirements:
+
+- Display clear validation errors next to the relevant fields.
+- Show a visible summary when appropriate.
+- Preserve all previously entered valid values after validation fails.
+- Keep the user on the same form when validation fails.
+- Use understandable Persian messages.
+- Distinguish required-field errors, invalid numbers, invalid dates, invalid weights, and invalid product selections.
+- Ensure invalid submissions do not create database records or partially update inventory.
+- Validate input on the server side, even if client-side validation is also used.
+- Use Django forms or the existing validation architecture rather than duplicating validation logic unnecessarily.
+
+Review both inventory entry and inventory exit workflows.
+
+Add tests for missing required fields, invalid values, preservation of submitted values, and prevention of invalid database writes.
+
+---
+
+## 7. Remove the Product Conversion Feature
+
+Remove the existing feature or section called "تبدیل به فرآورده" (Convert to Product / Product Conversion) entirely from the user-facing application.
+
+Requirements:
+
+- Remove its navigation item, buttons, forms, views, URLs, and templates where they are exclusively associated with this feature.
+- Remove related workflows and obsolete business logic if they are no longer used.
+- Ensure inventory operations use the parent-product and product-output rules described below.
+- Do not remove unrelated inventory functionality.
+- Do not delete historical data or database tables blindly. Determine whether existing records or dependencies require a safe migration or a compatibility strategy.
+- Remove obsolete tests and add replacement tests for the new inventory workflow.
+
+The new parent-product inventory model must not depend on the old conversion feature.
+
+---
+
+## 8. Simplify and Correct the Product Categories
+
+The business deals with these four parent meat categories only:
+
+- Chicken (مرغ)
+- Lamb (گوسفندی)
+- Beef (گوساله)
+- Turkey (بوقلمون)
+
+Remove the standalone business category called "گوشت" if it represents a separate inventory category rather than a generic label.
+
+Do not create additional parent meat categories unless the existing requirements explicitly demand them.
+
+The inventory must distinguish between:
+
+1. Parent products: the main inventory categories.
+2. Child products: products obtained from a parent, such as chicken breast or chicken legs.
+3. Exceptional incoming products: products that occasionally arrive directly but still belong to a parent category.
+
+Examples of parent-child relationships:
+
+- Chicken (مرغ)
+  - Chicken breast (سینه)
+  - Chicken leg (ران)
+  - Chicken wing (بال)
+  - Chicken fillet (فیله)
+  - Other existing chicken products.
+
+- Lamb (گوسفندی)
+  - Relevant lamb cuts.
+
+- Beef (گوساله)
+  - Relevant beef cuts.
+
+- Turkey (بوقلمون)
+  - Relevant turkey cuts.
+
+Inspect existing product data and relationships before changing the schema. Reuse existing products and preserve their identifiers whenever possible.
+
+Do not assume that all possible child products must exist in the database. The system must support the actual products configured by the customer.
+
+---
+
+## 9. Redesign Inventory Entry Around Parent Products
+
+The current inventory-entry workflow needs a substantial revision.
+
+The primary rule is:
+
+**Normal incoming stock is recorded against a parent product, and its weight increases the parent inventory.**
+
+For example:
+
+An incoming receipt contains 10 kg of chicken.
+
+The 10 kg is added to the Chicken parent inventory. It is not automatically split into chicken breast, legs, wings, or other cuts.
+
+The inventory-entry form should allow the user to:
+
+- Select the parent product.
+- Enter the incoming weight manually.
+- Enter the applicable unit price.
+- Select or enter the operator.
+- Set the receipt date, defaulting to today but allowing manual changes.
+- Enter other receipt information already supported by the project.
+- Submit the receipt with clear validation and confirmation.
+
+### Exceptional incoming child products
+
+Sometimes a child product may arrive directly.
+
+For example, chicken wings may arrive as a separate delivery.
+
+In this case:
+
+- The user may select Chicken Wings as the incoming product.
+- The system must resolve its associated parent product, Chicken.
+- The incoming weight must be credited to the Chicken parent inventory.
+- It must not create a separate independent inventory balance for Chicken Wings.
+- The original product selected on the receipt must still be recorded for traceability.
+
+The same rule applies to other child products and all four parent categories.
+
+If a child product has no configured parent, reject the transaction with a clear validation error rather than silently creating an incorrect stock balance.
+
+### Incoming prices
+
+The unit price must be entered or determined when an incoming receipt is recorded.
+
+Requirements:
+
+- Support the appropriate price field for the existing business workflow.
+- Validate prices as non-negative monetary values and reject invalid input.
+- Store monetary values consistently with the project's existing currency rules.
+- If the application stores monetary amounts in Rial and displays Toman, preserve that convention and perform conversions only at the appropriate input/import/display boundaries.
+- Never silently mix Rial and Toman.
+- Preserve the receipt's recorded price as a historical snapshot.
+- Do not overwrite historical receipt prices when the product's default price changes later.
+
+If the existing application already supports a product default price, it may be used as an initial value, but the user must be able to enter the actual price applicable to the incoming receipt.
+
+Add tests for parent receipts, exceptional child-product receipts, price validation, parent resolution, and invalid parent relationships.
+
+---
+
+## 10. Redesign Inventory Exit Around Parent Stock
+
+The inventory exit workflow must be updated to reflect the parent-product inventory model.
+
+When an employee records an outgoing child product, the system must deduct its weight from the associated parent product.
+
+Example:
+
+Chicken parent stock: 10 kg.
+
+Outgoing transactions:
+
+- 2 kg chicken legs.
+- 3 kg chicken breast.
+- 1 kg chicken wings.
+
+The parent chicken stock decreases by a total of 6 kg.
+
+Remaining parent stock: 4 kg.
+
+Requirements:
+
+- Users select the actual product being issued, such as chicken breast.
+- The system resolves its parent product.
+- The outgoing weight is deducted from the parent inventory.
+- Child products do not maintain independent stock balances.
+- The transaction preserves the actual outgoing child product for history, reporting, and traceability.
+- Validate that the requested outgoing weight is positive and that sufficient parent stock is available, unless the existing business rules explicitly allow negative stock.
+- Prevent concurrent transactions from causing incorrect balances, using appropriate database transactions and locking if necessary.
+- Show clear errors for insufficient stock or missing parent relationships.
+
+### Remove the existing "has stock" restriction
+
+Remove any rule that prevents a child product from being selected for an outgoing transaction simply because the child product has no independent stock.
+
+A child product can be issued as long as its parent inventory has sufficient available stock.
+
+Do not remove legitimate availability checks on the actual parent inventory.
+
+Add tests for deductions through multiple child products, insufficient parent stock, and child products without independent stock.
+
+---
+
+## 11. Parent Inventory and Stock Movement Rules
+
+The system must have one consistent source of truth for inventory.
+
+The inventory balance must be based on recorded stock movements rather than independently maintained, contradictory parent and child balances.
+
+Use the existing inventory architecture if it can correctly support these rules. Otherwise, implement the smallest necessary changes.
+
+The following rules are mandatory:
+
+1. A normal parent-product receipt increases the parent stock.
+2. An exceptional child-product receipt increases its associated parent stock.
+3. An outgoing child product decreases its associated parent stock.
+4. A child product does not receive an independent stock balance.
+5. Every stock movement retains its actual product, resolved parent product, weight, date, operator, and relevant document references.
+6. Stock changes must be atomic: an invalid transaction must not partially update inventory.
+7. Historical transactions must remain available for reporting and auditing.
+8. Parent inventory must never be accidentally counted twice.
+
+Review all existing stock calculations, inventory queries, product availability rules, and report logic to ensure they use the same model.
+
+If the project stores stock balances separately for performance, ensure that the balance is updated transactionally and can be reconciled with the movement history.
+
+Do not introduce an unnecessarily complicated inventory ledger if the existing architecture can be safely extended.
+
+---
+
+## 12. Implement Inventory Loss / Yield Reporting
+
+Add a simple report for calculating the difference between incoming parent-product weight and outgoing child-product weight over a user-selected date range.
+
+The report must allow the user to choose:
+
+- A predefined period, such as the last 10 days.
+- A custom start date and end date.
+- A parent product, such as Chicken, Lamb, Beef, or Turkey.
+
+The exact business calculation is:
+
+**Net difference = incoming parent-equivalent weight − outgoing child-product weight**
+
+Example:
+
+During the selected reporting period:
+
+- Chicken received: 100 kg.
+- Chicken legs issued: 25 kg.
+- Chicken breast issued: 30 kg.
+- Chicken wings issued: 10 kg.
+- Other chicken products issued: 20 kg.
+
+Total outgoing chicken-related products: 85 kg.
+
+Net difference: 15 kg.
+
+The report should display:
+
+- Selected parent product.
+- Start and end dates.
+- Total incoming weight.
+- Total outgoing weight across all associated child products.
+- Net difference in kilograms.
+- A percentage where meaningful and mathematically valid.
+
+For example:
+
+Loss percentage = (net difference / incoming weight) × 100
+
+If incoming weight is zero, avoid division by zero and display an appropriate result.
+
+### Important accounting distinction
+
+The net difference is not automatically proven physical waste. It represents the difference between recorded incoming and outgoing weights for the selected period.
+
+Label it appropriately, for example "افت / اختلاف وزن" (Loss / Weight Difference), and document the calculation.
+
+Do not silently classify every positive difference as confirmed waste.
+
+### Date-range correctness
+
+Ensure that the report uses the same date semantics for all movements.
+
+Do not combine incoming stock from one reporting period with outgoing stock from an unrelated period in a way that creates misleading results.
+
+Inspect the existing data model and implement a consistent reporting rule.
+
+If the application does not track batches, explain the limitations of period-based reconciliation and implement the most appropriate movement-date-based calculation without inventing batch traceability.
+
+Add tests for date filtering, parent-child aggregation, multiple outgoing products, zero incoming weight, and the calculated difference.
+
+---
+
+## 13. Remove Mouse-Wheel Changes From Weight Inputs
+
+Currently, weight fields can accidentally change when the user scrolls the mouse wheel while the field is focused.
+
+Prevent this behavior across all relevant inventory-entry and inventory-exit forms.
+
+Requirements:
+
+- Scrolling the mouse wheel must not change a focused weight value.
+- Preserve normal keyboard entry and editing.
+- Keep the existing numeric validation.
+- Ensure the behavior is consistent across supported browsers.
+- Apply the fix to all relevant weight fields, not just one form.
+
+Use an appropriate HTML input type or a small, maintainable JavaScript solution, depending on the existing implementation.
+
+Do not disable page scrolling globally.
+
+Add a suitable frontend test or manual verification step if the existing test framework cannot test this behavior automatically.
+
+---
+
+## 14. Make Product Search Independent of Persian and English Digits
+
+Product search must work regardless of whether the user enters Persian or English digits.
+
+For example, searching for a product using `123`, `۱۲۳`, or `١٢٣` should not fail solely because the digit representation differs.
+
+Normalize the following digit sets:
+
+- English digits: 0–9.
+- Persian digits: ۰–۹.
+- Arabic-Indic digits: ٠–٩.
+
+Requirements:
+
+- Apply consistent digit normalization to both search input and searchable product values where appropriate.
+- Preserve Persian and English text search behavior.
+- Trim unnecessary whitespace and normalize equivalent digit representations.
+- Do not change the actual stored product names or identifiers solely to make searching work.
+- Ensure that search works in product selectors, inventory forms, and other relevant search interfaces.
+- If search uses JavaScript filtering, Django ORM queries, or a custom endpoint, fix the correct layer rather than implementing inconsistent normalization in multiple places.
+
+Add tests for equivalent digit representations, mixed Persian/English digits, and normal text searches.
+
+---
+
+## 15. Show Products With Available Stock First
+
+Where the application lists products for operational selection, prioritize products that are currently available in the parent inventory.
+
+Examples include inventory issue forms and other product selectors where current availability is relevant.
+
+Requirements:
+
+- Products whose parent inventory has available stock should appear first.
+- Products without available stock should appear afterward when they are still valid options.
+- Preserve the existing search, filtering, and alphabetical behavior within each group where practical.
+- Do not duplicate products.
+- Do not treat a child product as unavailable merely because it has no independent stock balance.
+- Availability must be determined from the associated parent inventory.
+
+The ordering should be implemented efficiently in the existing query or selection layer.
+
+Avoid N+1 database queries or repeatedly recalculating stock for every product in Python.
+
+Add tests for ordering, parent-stock resolution, and products with no available stock.
+
+---
+
+## 16. Format Prices, Amounts, and Weights for Readability
+
+Format monetary amounts and other large numeric values using thousands separators.
+
+Examples:
+
+- `250000` → `250,000`
+- `1250000` → `1,250,000`
+- `10000000` → `10,000,000`
+
+Requirements:
+
+- Apply consistent formatting to prices, totals, monetary fields, and relevant large quantities.
+- Support Persian-facing interfaces and right-to-left layouts.
+- Keep stored numeric values unchanged.
+- Preserve decimal precision for weights and other values where decimals are meaningful.
+- Do not round weights or monetary values unexpectedly.
+- Ensure formatted values remain understandable and valid in forms.
+- When editing a formatted number, ensure the input can be parsed safely and validated.
+- Apply formatting consistently to tables, detail pages, summaries, print templates, and reports.
+
+Keep the project's existing Rial/Toman conventions intact. Thousands separators must not introduce currency conversion or change stored values.
+
+Add tests for formatting and parsing large numbers, decimal weights, and Persian/English digit representations.
+
+---
+
+## 17. UI Consistency and Error Handling
+
+Review the affected pages and make their workflows consistent.
+
+Requirements:
+
+- Use consistent Persian labels and terminology.
+- Display success and failure feedback clearly.
+- Prevent duplicate submissions where practical.
+- Keep form values when validation fails.
+- Display current parent inventory where it helps users make an outgoing-stock decision.
+- Make the selected parent product and resolved parent relationship understandable to the operator.
+- Keep forms straightforward for non-technical shop employees.
+- Ensure all relevant tables and forms remain usable on the intended desktop environment.
+- Preserve existing authentication, authorization, and administrative functionality.
+
+Do not redesign unrelated pages or introduce a large frontend framework.
+
+---
+
+## 18. Data Migration and Backward Compatibility
+
+Before changing product relationships or removing the conversion feature, inspect the current database schema and historical data.
+
+Requirements:
+
+- Preserve existing products and transaction history.
+- Establish or repair parent-child relationships for the four supported parent categories.
+- Avoid deleting existing records simply because the new UI no longer exposes them.
+- Do not create duplicate products during migrations.
+- Do not reset or overwrite the customer's production database.
+- Ensure migration behavior is safe for both an existing development database and a future production installation.
+- Use data migrations only when necessary and make them deterministic and reversible where practical.
+- If the existing database contains ambiguous product relationships, do not guess silently. Document the ambiguity and provide a safe way to resolve it.
+
+Review any existing fixture or initial product data and update it only where required.
+
+---
+
+## 19. Testing and Verification Requirements
+
+Write or update tests incrementally as each feature is implemented.
+
+At minimum, cover:
+
+### Dates and operators
+- Default document date.
+- Manually selected historical date.
+- Invalid dates.
+- Predefined and custom operator names.
+
+### Inventory entry
+- Parent-product receipt.
+- Exceptional child-product receipt.
+- Parent stock increase.
+- Incoming unit price.
+- Invalid weight and price.
+- Missing parent relationship.
+
+### Inventory exit
+- Child-product deduction from parent stock.
+- Multiple child products deducted from one parent.
+- Insufficient stock.
+- Prevention of invalid or partial transactions.
+- Removal of independent child-stock restrictions.
+
+### Loss report
+- Incoming weight aggregation.
+- Outgoing child-product aggregation.
+- Date-range filtering.
+- Net difference.
+- Zero-incoming-weight handling.
+- Multiple parent categories.
+
+### Search and display
+- Persian, English, and Arabic-Indic digit normalization.
+- Products with available stock appearing first.
+- Thousands separators.
+- Decimal weight preservation.
+- Formatted number parsing.
+
+### UI and printing
+- Required-field validation errors.
+- Form data preserved after errors.
+- No invalid database writes.
+- A5 print styles for all existing print templates.
+- Removal of the old product-conversion workflow.
+- Weight inputs unaffected by mouse-wheel scrolling, using an appropriate frontend verification method.
+
+Run the relevant tests after each change, then run the full test suite.
+
+Also run the appropriate Django system checks and verify migrations.
+
+---
+
+## 20. Implementation Order
+
+Implement the changes in this order to reduce risk:
+
+1. Inspect the project and document the existing architecture and discrepancies.
+2. Identify and correct the parent-child product model and stock calculation rules.
+3. Update inventory entry, exceptional incoming products, and incoming prices.
+4. Update inventory exit and parent-stock deductions.
+5. Implement the loss/weight-difference report.
+6. Add or correct document dates and operator selection.
+7. Fix validation errors and preserve form values.
+8. Normalize product search digits and improve product ordering.
+9. Prevent mouse-wheel changes in weight fields.
+10. Apply number formatting consistently.
+11. Standardize all print templates to A5 and update Vaka Protein branding.
+12. Remove the obsolete product-conversion workflow safely.
+13. Complete migrations, regression tests, and documentation updates.
+
+You may adjust the order when the existing architecture requires a dependency to be implemented earlier, but do not compromise the business rules.
+
+## 21. Final Deliverable
+
+After implementation, provide a concise but complete report containing:
+
+1. The important findings from the initial codebase inspection.
+2. The files changed and the purpose of each major change.
+3. Any database schema or data migrations created.
+4. The implemented parent-product inventory rules.
+5. The exact loss-report calculation and date semantics.
+6. The implementation chosen for predefined and manually entered operators.
+7. The print templates updated for A5.
+8. The automated tests added or changed.
+9. The exact test and Django-check commands executed and their actual results.
+10. Any unresolved issues, ambiguous existing data, or manual verification still required.
+
+Do not claim that the application is fully verified if tests or manual checks remain incomplete.
+
+**Important:** Implement the changes in the existing MeatShop project, preserve customer data, keep the solution simple and maintainable, and do not implement unrelated hardware integration or future-phase features.
