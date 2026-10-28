@@ -75,8 +75,7 @@ class Product(models.Model):
     class Meta:
         verbose_name = "کالا"
         verbose_name_plural = "کالاها"
-        # Deterministic sorting: Category -> Parent Products -> Child Products (Name -> ID fallback)
-        ordering = ['category__display_order', 'category__id', '-is_parent', 'name', 'id']
+        ordering = ['category', 'name']
 
     def __str__(self):
         return self.name
@@ -93,7 +92,18 @@ class Product(models.Model):
         if self.parent_id is not None:
             if self.parent == self:
                 return self
-            return self.parent.get_parent()
+
+            # Prevent infinite loop in legacy data during read
+            visited = {self.id}
+            curr = self.parent
+            while curr is not None:
+                if curr.is_parent:
+                    return curr
+                if curr.id in visited or curr.id == curr.parent_id:
+                    break
+                visited.add(curr.id)
+                curr = curr.parent
+            return None
 
         # Phase 5: Ambiguity Reporting
         # Fallback: look up designated parent product in this category

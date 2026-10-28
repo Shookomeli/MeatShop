@@ -3659,3 +3659,21 @@ class Phase8InvoiceHistoryTestCase(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertContains(res, "250,000 تومان")
         self.assertNotContains(res, "999,000 تومان")
+
+    def test_export_csv_handles_invalid_dates_safely(self):
+        from django.urls import reverse
+        res = self.client.get(reverse('export_sales_csv') + '?start_date=invalid&end_date=1403/99/99')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res['Content-Type'], 'text/csv; charset=utf-8-sig')
+
+    def test_export_sales_csv_empty_dataset(self):
+        from django.urls import reverse
+        Invoice.objects.all().delete()
+        res = self.client.get(reverse('export_sales_csv'))
+        self.assertEqual(res.status_code, 200)
+        content = res.content.decode('utf-8')
+        # Should just be headers
+        self.assertIn('شماره فاکتور', content)
+        # Should be exactly 1 line (headers)
+        lines = [line for line in content.split('\r\n') if line.strip()]
+        self.assertEqual(len(lines), 1)
