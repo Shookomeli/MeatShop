@@ -31,6 +31,34 @@ def to_latin_digits(value: str) -> str:
     return str(value).translate(LATIN_DIGITS_TABLE)
 
 
+def format_thousands(value) -> str:
+    """
+    Shared display formatter for monetary amounts: Persian digits with ',' thousands separators,
+    e.g. 12500000 -> '۱۲,۵۰۰,۰۰۰'. Display only: never store or calculate with the result.
+    Sign and decimal precision are kept; already-formatted strings (Latin or Persian digits,
+    ',' or '٬' separators) are re-parsed so separators are never doubled.
+    """
+    from decimal import Decimal, InvalidOperation
+    if value is None or value == '':
+        return '۰'
+    if isinstance(value, str):
+        raw = to_latin_digits(value).replace(',', '').replace('٬', '').strip()
+    else:
+        raw = str(value)
+    try:
+        amount = Decimal(raw)
+    except (InvalidOperation, ValueError):
+        return to_persian_digits(str(value))
+    if not amount.is_finite():
+        return to_persian_digits(str(value))
+    return to_persian_digits(f"{amount:,}")
+
+
+def format_rial(value) -> str:
+    """Monetary amount stored in Rial, formatted for display with its unit: '۱۲,۵۰۰,۰۰۰ ریال'."""
+    return f"{format_thousands(value)} ریال"
+
+
 def to_jalali_date(value: Optional[Union[date, datetime]], fmt: str = '%Y/%m/%d', persian_digits: bool = True) -> str:
     """
     Converts a Python date or datetime to a formatted Jalali date string.

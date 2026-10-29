@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% load jalali_tags %}
+
+{% block title %}انبارگردانی جدید | واکا پروتئین{% endblock %}
+
+{% block content %}
+<div style="max-width: 760px; margin: 0 auto;">
+    <a href="{% url 'reconciliation_list' %}" style="color: var(--text-muted); font-size: 0.85rem; text-decoration: none;">← بازگشت به فهرست انبارگردانی</a>
+    <h1 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main); margin: 0.35rem 0 0.25rem;">⚖️ ایجاد سند انبارگردانی جدید</h1>
+    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+        ورودی و خروجی دوره به‌صورت خودکار از گردش‌های نهایی انبار (رسید، حواله و فرآوری) محاسبه می‌شود. اگر دوره تاییدشده قبلی وجود داشته باشد،
+        موجودی اول دوره خودکار برابر موجودی توزین‌شده همان دوره قرار می‌گیرد.
+    </p>
+
+    {% if form_errors.general %}
+    <div class="form-error" role="alert" style="padding: 0.6rem 0.85rem; background: #fee2e2; border: 1px solid #fca5a5; border-radius: 6px; margin-bottom: 1rem;">
+        {{ form_errors.general }}
+    </div>
+    {% endif %}
+
+    <form method="POST" style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem;">
+        {% csrf_token %}
+        <div class="form-group">
+            <label class="form-label" for="recon-product">کالا / سهمیه انبار <span style="color: var(--danger);">*</span></label>
+            <select name="product" id="recon-product" class="form-select" required>
+                <option value="">-- انتخاب کالا --</option>
+                {% for p in products %}
+                <option value="{{ p.id }}" {% if form_data.product == p.id|stringformat:"s" %}selected{% endif %}>
+                    {% if p.is_parent %}⭐ [سهمیه والد] {% endif %}{{ p.name }} ({{ p.category.name }})
+                </option>
+                {% endfor %}
+            </select>
+            {% if form_errors.product %}<div class="form-error">{{ form_errors.product }}</div>{% endif %}
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div class="form-group">
+                <label class="form-label" for="recon-start">تاریخ شروع دوره (شمسی) <span style="color: var(--danger);">*</span></label>
+                <input type="text" name="start_date" id="recon-start" class="form-input" placeholder="۱۴۰۵/۰۸/۰۱" value="{{ form_data.start_date|default:'' }}" dir="ltr" required>
+                {% if form_errors.start_date %}<div class="form-error">{{ form_errors.start_date }}</div>{% endif %}
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="recon-end">تاریخ پایان دوره (شمسی) <span style="color: var(--danger);">*</span></label>
+                <input type="text" name="end_date" id="recon-end" class="form-input" placeholder="۱۴۰۵/۰۸/۰۷" value="{{ form_data.end_date|default:'' }}" dir="ltr" required>
+                {% if form_errors.end_date %}<div class="form-error">{{ form_errors.end_date }}</div>{% endif %}
+            </div>
+        </div>
+
+        <fieldset style="border: 1px dashed var(--border-color); border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 1rem;">
+            <legend style="font-size: 0.85rem; font-weight: 600; padding: 0 0.35rem;">موجودی اول دوره (فقط برای اولین دوره)</legend>
+            <div class="form-group" style="margin-bottom: 0.5rem;">
+                <input type="text" inputmode="decimal" name="opening_stock" class="form-input" placeholder="مثلاً ۰٫۰۰۰ — در صورت وجود دوره قبلی خالی بگذارید" value="{{ form_data.opening_stock|default:'' }}" dir="ltr">
+            </div>
+            <label style="font-size: 0.85rem;">
+                <input type="checkbox" name="is_opening_verified" {% if form_data.is_opening_verified == 'on' %}checked{% endif %}>
+                موجودی اول دوره را شمارش و تایید کرده‌ام
+            </label>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.35rem;">
+                بدون موجودی اول دوره تاییدشده، موجودی مورد انتظار و مغایرت محاسبه نمی‌شود و سند ناقص (پیش‌نویس) می‌ماند.
+            </div>
+        </fieldset>
+
+        <div class="form-group">
+            <label class="form-label" for="recon-actual">موجودی عینی توزین‌شده پایان دوره (kg)</label>
+            <input type="text" inputmode="decimal" name="actual_physical_closing_stock" id="recon-actual" class="form-input" placeholder="اختیاری — می‌توانید بعداً در صفحه بررسی وارد کنید" value="{{ form_data.actual_physical_closing_stock|default:'' }}" dir="ltr">
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">دقت ۰٫۰۰۱ کیلوگرم؛ عدد منفی پذیرفته نمی‌شود. خالی یعنی هنوز توزین نشده (صفر محسوب نمی‌شود).</div>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="recon-notes">یادداشت شمارش</label>
+            <textarea name="notes" id="recon-notes" class="form-input" rows="2">{{ form_data.notes|default:'' }}</textarea>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+            <a href="{% url 'reconciliation_list' %}" class="btn btn-secondary">انصراف</a>
+            <button type="submit" class="btn btn-primary">ایجاد و محاسبه</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -255,6 +255,12 @@
             color: #64748b;
         }
 
+        /* Physical inventory reconciliation statuses */
+        .recon-status-draft { background-color: #f1f5f9; color: #475569; }
+        .recon-status-calculated { background-color: #fef3c7; color: #92400e; }
+        .recon-status-approved { background-color: #dcfce7; color: #166534; }
+        .recon-status-closed { background-color: #1e293b; color: #f8fafc; }
+
         /* Form elements */
         .form-group {
             margin-bottom: 1rem;
@@ -317,6 +323,7 @@
                 <li><a href="{% url 'issue_list' %}" class="nav-link {% if 'issue' in request.resolver_match.url_name %}active{% endif %}">خروج و حواله</a></li>
                 <li><a href="{% url 'invoice_list' %}" class="nav-link {% if 'invoice' in request.resolver_match.url_name and request.resolver_match.url_name != 'invoice_from_source' %}active{% endif %}">فاکتورها</a></li>
                 <li><a href="{% url 'invoice_from_source' %}" class="nav-link {% if request.resolver_match.url_name == 'invoice_from_source' %}active{% endif %}">فاکتور از اسناد انبار</a></li>
+                <li><a href="{% url 'reconciliation_list' %}" class="nav-link {% if 'reconciliation' in request.resolver_match.url_name %}active{% endif %}">انبارگردانی</a></li>
                 <li><a href="{% url 'report_loss' %}" class="nav-link {% if request.resolver_match.url_name == 'report_loss' %}active{% endif %}">گزارش افت و بازدهی</a></li>
                 <li><a href="{% url 'reports_hub' %}" class="nav-link {% if 'report' in request.resolver_match.url_name and request.resolver_match.url_name != 'report_loss' %}active{% endif %}">گزارش‌ها و آمار</a></li>
                 <li><a href="/admin/" class="nav-link">مدیریت (Admin)</a></li>
@@ -327,6 +334,14 @@
             <a href="{% url 'issue_create' %}" class="btn btn-secondary btn-sm">- حواله خروج</a>
             <a href="{% url 'invoice_from_source' %}" class="btn btn-secondary btn-sm">📄 فاکتور از اسناد</a>
             <a href="{% url 'invoice_create' %}" class="btn btn-primary btn-sm">+ صدور فاکتور</a>
+            {% if user.is_authenticated %}
+            <form method="POST" action="{% url 'logout' %}" style="display: inline;" id="nav-logout-form">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-secondary btn-sm" title="خروج از حساب">👤 {{ user.username }} | خروج</button>
+            </form>
+            {% else %}
+            <a href="{% url 'login' %}?next={{ request.path|urlencode }}" class="btn btn-secondary btn-sm" id="nav-login-link">ورود</a>
+            {% endif %}
         </div>
     </header>
 
@@ -356,6 +371,38 @@
                 document.activeElement.blur();
             }
         }, { passive: true });
+    </script>
+    <!-- Shared money formatting for live previews; mirrors sales.date_utils.format_thousands / format_rial
+         and sales.services.calculate_line_total_rial. Display only: submitted values stay raw Rial integers. -->
+    <script>
+        (function () {
+            const FA = '۰۱۲۳۴۵۶۷۸۹';
+            function toFaDigits(s) { return String(s).replace(/[0-9]/g, d => FA[d]); }
+            function toLatinDigits(s) {
+                return String(s).replace(/[۰-۹]/g, d => String(FA.indexOf(d))).replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x0660));
+            }
+            window.formatThousands = function (value) {
+                if (value === null || value === undefined || value === '') return '۰';
+                const raw = toLatinDigits(value).replace(/[,٬\s]/g, '');
+                if (!/^-?\d+(\.\d+)?$/.test(raw)) return toFaDigits(value);
+                const neg = raw.startsWith('-');
+                const [intPart, frac] = raw.replace('-', '').split('.');
+                const grouped = intPart.replace(/^0+(?=\d)/, '').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+                return toFaDigits((neg ? '-' : '') + grouped + (frac !== undefined ? '.' + frac : ''));
+            };
+            window.formatRial = function (value) { return window.formatThousands(value) + ' ریال'; };
+            // Approximate Toman hint for price-entry fields only
+            window.formatTomanHint = function (rial) {
+                const r = parseInt(rial, 10);
+                return r > 0 ? '≈ ' + window.formatThousands(Math.floor(r / 10)) + ' تومان' : '';
+            };
+            // Whole-Rial line total truncated like the server (ROUND_DOWN); amount has <= 3 decimals
+            window.calcLineTotalRial = function (amount, unitPriceRial) {
+                const milli = Math.round(Number(amount) * 1000);
+                const price = parseInt(unitPriceRial, 10) || 0;
+                return Math.trunc((milli * price) / 1000);
+            };
+        })();
     </script>
     {% block extra_scripts %}{% endblock %}
 </body>

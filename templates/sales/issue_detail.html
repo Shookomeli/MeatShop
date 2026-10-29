@@ -42,6 +42,63 @@
         color: #000000 !important;
         padding: 4px 6px !important;
     }
+
+    /* A5 fit: compact the three header blocks (title, document metadata, parties) */
+    .print-document { padding: 4mm !important; }
+    .print-document .doc-header {
+        padding-bottom: 2mm !important;
+        margin-bottom: 2mm !important;
+        gap: 3mm;
+        line-height: 1.35 !important;
+    }
+    .print-document .doc-header * { font-size: 8.5pt !important; line-height: 1.35 !important; }
+    .print-document .doc-header .doc-title { font-size: 12pt !important; margin-bottom: 0 !important; }
+    .print-document .doc-header .doc-number { font-size: 10pt !important; }
+    .print-document .meta-grid {
+        padding: 2mm 3mm !important;
+        margin-bottom: 2mm !important;
+        gap: 1mm 3mm !important;
+        line-height: 1.3 !important;
+    }
+    .print-document .meta-grid * { font-size: 8pt !important; }
+    .print-document .weighing-summary-card {
+        padding: 2mm !important;
+        gap: 2mm !important;
+        margin-bottom: 3mm !important;
+    }
+    .print-document .weighing-stat-title { font-size: 7.5pt !important; margin-bottom: 0 !important; }
+    .print-document .weighing-stat-val { font-size: 10pt !important; }
+    .print-document .weighing-stat-money { white-space: nowrap; }
+
+    /* Items table: full width, never clipped; secondary columns dropped from the A5 copy */
+    .print-document table.doc-items-table { width: 100% !important; table-layout: fixed; font-size: 8pt !important; }
+    .print-document table.doc-items-table th,
+    .print-document table.doc-items-table td {
+        white-space: normal !important;
+        overflow-wrap: anywhere;
+        padding: 3px 3px !important;
+    }
+    .print-document table.doc-items-table tr { page-break-inside: avoid; }
+    /* Category / line remarks move under the product name instead of their own columns */
+    .print-document table.doc-items-table .col-category,
+    .print-document table.doc-items-table .col-remarks { display: none !important; }
+    .print-document .print-line-extra { display: block !important; font-size: 7pt !important; color: #333333 !important; }
+    .print-document th.col-idx { width: 6% !important; }
+    .print-document th.col-weight { width: 13% !important; }
+    .print-document th.col-tare { width: 11% !important; }
+    .print-document th.col-price { width: 17% !important; }
+    .print-document th.col-total { width: 19% !important; }
+    .print-document .money-cell { white-space: nowrap !important; overflow-wrap: normal !important; }
+    /* Numbers may wrap between words but never split inside a number */
+    .print-document table.data-table td.tabular-nums { overflow-wrap: normal !important; }
+    .print-document h2 { font-size: 9.5pt !important; margin-bottom: 2mm !important; }
+    .print-document .doc-notes { padding: 2mm 3mm !important; margin-bottom: 2mm !important; font-size: 8.5pt !important; }
+    .print-document .signatures-section { margin-top: 4mm !important; padding-top: 3mm !important; page-break-inside: avoid; }
+    .print-document .sig-title { margin-bottom: 10mm !important; font-size: 8.5pt !important; }
+}
+
+.print-line-extra {
+    display: none;
 }
 
 .print-document {
@@ -176,7 +233,7 @@
                 </p>
             </div>
             <div style="text-align: left;">
-                <div style="font-size: 1.15rem; font-weight: 700; color: #991b1b;" class="tabular-nums">
+                <div style="font-size: 1.15rem; font-weight: 700; color: #991b1b;" class="tabular-nums doc-number">
                     {{ issue.document_number }}
                 </div>
                 <div style="font-size: 0.85rem; color: var(--text-muted);" class="tabular-nums">
@@ -244,10 +301,10 @@
                 </div>
             </div>
             <div>
-                <div class="weighing-stat-title">مبلغ کل حواله</div>
-                <div class="weighing-stat-val tabular-nums" style="color: var(--primary);">
+                <div class="weighing-stat-title">مبلغ کل حواله (ریال)</div>
+                <div class="weighing-stat-val weighing-stat-money tabular-nums" style="color: var(--primary);">
                     {% if issue.aggregate_total_amount %}
-                        {{ issue.aggregate_total_amount|toman_display }}
+                        {{ issue.aggregate_total_amount|thousands }}
                     {% else %}
                         —
                     {% endif %}
@@ -260,97 +317,104 @@
             <h2 style="font-size: 0.95rem; font-weight: 700; margin-bottom: 0.75rem; color: var(--text-main);">
                 اقلام تفکیکی حواله خروج
             </h2>
-            <table class="data-table" style="font-size: 0.85rem;">
+            <table class="data-table doc-items-table" style="font-size: 0.85rem;">
                 <thead>
                     <tr>
-                        <th style="width: 45px;">ردیف</th>
-                        <th>شرح کالا / قطعه گوشت</th>
-                        <th style="width: 110px;">دسته‌بندی</th>
-                        <th style="width: 100px;">وزن ناخالص</th>
-                        <th style="width: 95px;">پارسنگ</th>
-                        <th style="width: 100px;">وزن خالص</th>
-                        <th style="width: 110px;">قیمت واحد</th>
-                        <th style="width: 115px;">مبلغ سطر</th>
-                        <th>ملاحظات</th>
+                        <th class="col-idx" style="width: 45px;">ردیف</th>
+                        <th class="col-name">شرح کالا / قطعه گوشت</th>
+                        <th class="col-category" style="width: 110px;">دسته‌بندی</th>
+                        <th class="col-weight" style="width: 100px;">وزن ناخالص (kg)</th>
+                        <th class="col-tare" style="width: 95px;">پارسنگ (kg)</th>
+                        <th class="col-weight" style="width: 100px;">وزن خالص (kg)</th>
+                        <th class="col-price" style="width: 110px;">قیمت واحد (ریال)</th>
+                        <th class="col-total" style="width: 115px;">مبلغ سطر (ریال)</th>
+                        <th class="col-remarks">ملاحظات</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% if issue.items.exists %}
                         {% for item in issue.items.all %}
                         <tr>
-                            <td class="tabular-nums" style="text-align: center;">{{ forloop.counter }}</td>
-                            <td><strong>{{ item.product.name }}</strong></td>
-                            <td style="color: var(--text-muted);">{{ item.product.category.name }}</td>
-                            <td class="tabular-nums">{{ item.gross_weight_kg|floatformat:3 }} kg</td>
-                            <td class="tabular-nums" style="color: #b91c1c;">-{{ item.total_tare_weight_kg|floatformat:3 }} kg</td>
-                            <td class="tabular-nums" style="font-weight: 700; color: #15803d;">{{ item.net_weight_kg|floatformat:3 }} kg</td>
-                            <td class="tabular-nums">
-                                {% if item.unit_price_rial %}
-                                    {{ item.unit_price_rial|toman_display }}
+                            <td class="tabular-nums" style="text-align: center;">{{ forloop.counter|fa_digits }}</td>
+                            <td>
+                                <strong>{{ item.product.name }}</strong>
+                                <div class="print-line-extra">{{ item.product.category.name }}{% if item.remarks %} — {{ item.remarks }}{% endif %}</div>
+                            </td>
+                            <td class="col-category" style="color: var(--text-muted);">{{ item.product.category.name }}</td>
+                            <td class="tabular-nums">{{ item.gross_weight_kg|format_weight_kg }}</td>
+                            <td class="tabular-nums" style="color: #b91c1c;">-{{ item.total_tare_weight_kg|format_weight_kg }}</td>
+                            <td class="tabular-nums" style="font-weight: 700; color: #15803d;">{{ item.net_weight_kg|format_weight_kg }}</td>
+                            <td class="tabular-nums money-cell">
+                                {% if item.unit_price_rial is not None %}
+                                    {{ item.unit_price_rial|thousands }}
                                 {% else %}
                                     —
                                 {% endif %}
                             </td>
-                            <td class="tabular-nums" style="font-weight: 600;">
-                                {% if item.line_total_rial %}
-                                    {{ item.line_total_rial|toman_display }}
+                            <td class="tabular-nums money-cell" style="font-weight: 600;">
+                                {% if item.line_total_rial is not None %}
+                                    {{ item.line_total_rial|thousands }}
                                 {% else %}
                                     —
                                 {% endif %}
                             </td>
-                            <td style="font-size: 0.8rem; color: var(--text-muted);">{{ item.remarks|default:"—" }}</td>
+                            <td class="col-remarks" style="font-size: 0.8rem; color: var(--text-muted);">{{ item.remarks|default:"—" }}</td>
                         </tr>
                         {% endfor %}
                     {% elif issue.product %}
                         <!-- Legacy single-item display -->
                         <tr>
                             <td class="tabular-nums" style="text-align: center;">۱</td>
-                            <td><strong>{{ issue.product.name }}</strong></td>
-                            <td style="color: var(--text-muted);">{{ issue.product.category.name }}</td>
-                            <td class="tabular-nums">{{ issue.aggregate_gross_weight|floatformat:3 }} kg</td>
-                            <td class="tabular-nums" style="color: #b91c1c;">-{{ issue.total_tare_weight_kg|floatformat:3 }} kg</td>
-                            <td class="tabular-nums" style="font-weight: 700; color: #15803d;">{{ issue.aggregate_net_weight|floatformat:3 }} kg</td>
-                            <td class="tabular-nums">
-                                {% if issue.unit_price_rial %}
-                                    {{ issue.unit_price_rial|toman_display }}
+                            <td>
+                                <strong>{{ issue.product.name }}</strong>
+                                <div class="print-line-extra">{{ issue.product.category.name }}</div>
+                            </td>
+                            <td class="col-category" style="color: var(--text-muted);">{{ issue.product.category.name }}</td>
+                            <td class="tabular-nums">{{ issue.aggregate_gross_weight|format_weight_kg }}</td>
+                            <td class="tabular-nums" style="color: #b91c1c;">-{{ issue.total_tare_weight_kg|format_weight_kg }}</td>
+                            <td class="tabular-nums" style="font-weight: 700; color: #15803d;">{{ issue.aggregate_net_weight|format_weight_kg }}</td>
+                            <td class="tabular-nums money-cell">
+                                {% if issue.unit_price_rial is not None %}
+                                    {{ issue.unit_price_rial|thousands }}
                                 {% else %}
                                     —
                                 {% endif %}
                             </td>
-                            <td class="tabular-nums" style="font-weight: 600;">
-                                {% if issue.line_total_rial %}
-                                    {{ issue.line_total_rial|toman_display }}
+                            <td class="tabular-nums money-cell" style="font-weight: 600;">
+                                {% if issue.line_total_rial is not None %}
+                                    {{ issue.line_total_rial|thousands }}
                                 {% else %}
                                     —
                                 {% endif %}
                             </td>
-                            <td style="font-size: 0.8rem; color: var(--text-muted);">{{ issue.remarks|default:"—" }}</td>
+                            <td class="col-remarks" style="font-size: 0.8rem; color: var(--text-muted);">{{ issue.remarks|default:"—" }}</td>
                         </tr>
                     {% endif %}
                 </tbody>
                 <tfoot>
                     <tr style="background: #f8fafc; font-weight: 700;">
-                        <td colspan="3" style="text-align: left; padding: 0.6rem 0.75rem;">
+                        <td colspan="2" style="text-align: left; padding: 0.6rem 0.75rem;">
                             مجموع کل اوزان و مبالغ:
                         </td>
+                        <td class="col-category"></td>
                         <td class="tabular-nums" style="padding: 0.6rem 0.75rem;">
-                            {{ issue.aggregate_gross_weight|floatformat:3 }} kg
+                            {{ issue.aggregate_gross_weight|format_weight_kg }}
                         </td>
                         <td class="tabular-nums" style="color: #b91c1c; padding: 0.6rem 0.75rem;">
-                            -{{ issue.total_tare_weight_kg|floatformat:3 }} kg
+                            -{{ issue.total_tare_weight_kg|format_weight_kg }}
                         </td>
                         <td class="tabular-nums" style="color: #15803d; padding: 0.6rem 0.75rem;">
-                            {{ issue.aggregate_net_weight|floatformat:3 }} kg
+                            {{ issue.aggregate_net_weight|format_weight_kg }}
                         </td>
                         <td></td>
-                        <td class="tabular-nums" style="color: var(--primary); padding: 0.6rem 0.75rem;">
+                        <td class="tabular-nums money-cell" style="color: var(--primary); padding: 0.6rem 0.75rem;">
                             {% if issue.aggregate_total_amount %}
-                                {{ issue.aggregate_total_amount|toman_display }}
+                                {{ issue.aggregate_total_amount|thousands }}
                             {% else %}
                                 —
                             {% endif %}
                         </td>
-                        <td></td>
+                        <td class="col-remarks"></td>
                     </tr>
                 </tfoot>
             </table>
@@ -390,7 +454,7 @@
         {% endif %}
 
         {% if issue.remarks %}
-        <div style="margin-bottom: 1rem; padding: 0.75rem; background: #f8fafc; border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 0.85rem;">
+        <div class="doc-notes" style="margin-bottom: 1rem; padding: 0.75rem; background: #f8fafc; border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 0.85rem;">
             <strong>توضیحات و ملاحظات حواله:</strong> {{ issue.remarks }}
         </div>
         {% endif %}

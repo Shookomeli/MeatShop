@@ -247,7 +247,7 @@
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
                 <div class="form-group">
                     <label class="form-label" style="font-size: 0.85rem;">قیمت واحد به ریال (اختیاری):</label>
-                    <input type="number" id="item-unit-price" class="form-input weight-input" placeholder="مبلغ به ریال" min="0" dir="ltr">
+                    <input type="number" id="item-unit-price" class="form-input weight-input" placeholder="مبلغ به ریال" min="0" step="1" dir="ltr">
                     <span id="toman-helper" style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-top: 2px;"></span>
                 </div>
                 <div class="form-group">
@@ -306,7 +306,7 @@
                             <td id="grand-tare" class="tabular-nums" style="padding: 0.6rem 0.75rem; color: #b91c1c;">-0.000 kg</td>
                             <td id="grand-net" class="tabular-nums" style="padding: 0.6rem 0.75rem; color: #15803d; font-size: 1.05rem;">0.000 kg</td>
                             <td></td>
-                            <td id="grand-amount" class="tabular-nums" style="padding: 0.6rem 0.75rem; color: var(--primary);">0 تومان</td>
+                            <td id="grand-amount" class="tabular-nums" style="padding: 0.6rem 0.75rem; color: var(--primary);">۰ ریال</td>
                             <td colspan="2"></td>
                         </tr>
                     </tfoot>
@@ -453,7 +453,7 @@
 
             if (price > 0 && !unitPriceInput.value) {
                 unitPriceInput.value = price;
-                tomanHelper.textContent = `${(price / 10).toLocaleString()} تومان`;
+                tomanHelper.textContent = formatTomanHint(price);
             }
         } else {
             selectedProductCard.style.display = 'none';
@@ -469,7 +469,7 @@
 
     unitPriceInput.addEventListener('input', function() {
         const p = parseInt(this.value) || 0;
-        tomanHelper.textContent = p > 0 ? `${(p / 10).toLocaleString()} تومان` : '';
+        tomanHelper.textContent = formatTomanHint(p);
     });
 
     // Scale integration
@@ -648,7 +648,7 @@
         }
 
         const unitPrice = parseInt(unitPriceInput.value) || null;
-        const lineTotal = unitPrice ? Math.round(netKg * unitPrice) : null;
+        const lineTotal = unitPrice ? calcLineTotalRial(netKg, unitPrice) : null;
         const remarks = document.getElementById('item-remarks').value.trim();
         const { entries } = getCurrentItemTareGrams();
 
@@ -718,7 +718,7 @@
             grandGross.textContent = '0.000 kg';
             grandTare.textContent = '-0.000 kg';
             grandNet.textContent = '0.000 kg';
-            grandAmount.textContent = '0 تومان';
+            grandAmount.textContent = formatRial(0);
             itemsJsonInput.value = '';
             return;
         }
@@ -739,8 +739,8 @@
                 hasAmount = true;
             }
 
-            const priceDisplay = item.unit_price_rial ? `${(item.unit_price_rial / 10).toLocaleString()} تومان` : '—';
-            const totalDisplay = item.line_total_rial ? `${(item.line_total_rial / 10).toLocaleString()} تومان` : '—';
+            const priceDisplay = item.unit_price_rial ? formatRial(item.unit_price_rial) : '—';
+            const totalDisplay = item.line_total_rial ? formatRial(item.line_total_rial) : '—';
 
             html += `
                 <tr>
@@ -764,7 +764,7 @@
         grandGross.textContent = totGross.toFixed(3) + ' kg';
         grandTare.textContent = '-' + totTare.toFixed(3) + ' kg';
         grandNet.textContent = totNet.toFixed(3) + ' kg';
-        grandAmount.textContent = hasAmount ? `${(totAmount / 10).toLocaleString()} تومان` : '—';
+        grandAmount.textContent = hasAmount ? formatRial(totAmount) : '—';
 
         btnSubmitIssue.disabled = false;
         itemsJsonInput.value = JSON.stringify(committedItems);

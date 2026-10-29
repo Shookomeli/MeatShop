@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load jalali_tags %}
 
 {% block title %}گزارش جامع فروش و عملکرد مالی | فروشگاه گوشت و مرغ{% endblock %}
 
@@ -71,12 +72,12 @@
     <!-- Summary Metrics -->
     <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem;">
         <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 1rem; text-align: center;">
-            <div style="font-size: 0.85rem; color: #1e40af;">مجموع درآمد فروش (تومان)</div>
-            <div style="font-size: 1.4rem; font-weight: 800; color: #1e3a8a; margin-top: 0.25rem;" class="tabular-nums">
-                {{ total_revenue_toman|floatformat:0 }} تومان
+            <div style="font-size: 0.85rem; color: #1e40af;">مجموع درآمد فروش</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: #1e3a8a; margin-top: 0.25rem;" class="tabular-nums" id="sales-total-revenue">
+                {{ total_revenue_rial|rial }}
             </div>
             <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem;">
-                {{ total_revenue_rial|floatformat:0 }} ریال
+                فقط فاکتورهای فروش نهایی
             </div>
         </div>
 
@@ -93,7 +94,7 @@
         <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 1rem; text-align: center;">
             <div style="font-size: 0.85rem; color: var(--text-muted);">تعداد فاکتورهای صادره</div>
             <div style="font-size: 1.4rem; font-weight: 800; color: #1e293b; margin-top: 0.25rem;" class="tabular-nums">
-                {{ invoice_count }}
+                {{ invoice_count|fa_digits }}
             </div>
             <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem;">
                 اسناد مالی قطعی
@@ -115,7 +116,7 @@
                         <th>دسته‌بندی</th>
                         <th>وزن فروخته‌شده (kg)</th>
                         <th>تعداد معامله</th>
-                        <th>درآمد حاصله (تومان)</th>
+                        <th>درآمد حاصله (ریال)</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -133,7 +134,7 @@
                             {{ row.total_qty }}
                         </td>
                         <td class="tabular-nums" style="color: #15803d; font-weight: 700;">
-                            {{ row.total_revenue|default:0|floatformat:0 }} ریال
+                            {{ row.total_revenue|default:0|thousands }}
                         </td>
                     </tr>
                     {% empty %}

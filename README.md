@@ -25,7 +25,7 @@ Environment settings are configured via `.env` (derived from `.env.example`).
 | `SECRET_KEY` | *(insecure dev key)* | Cryptographic signing key. Must be a strong unique string in production. |
 | `DEBUG` | `True` | Set to `False` in production. |
 | `SCALE_MODE` | `mock` | Scale integration mode: `mock` (development) or `keli_xk3118t1` (hardware). |
-| `CURRENCY_DISPLAY_UNIT` | `TOMAN` | Presentation unit: `TOMAN` or `RIAL`. Affects display only; all stored values are Rial. |
+| `CURRENCY_DISPLAY_UNIT` | `RIAL` | Kept for compatibility. All monetary displays are Rial; Toman is shown only as an approximate hint under price-entry fields. All stored values are Rial. |
 | `DATABASE_PATH` | *(none)* | Custom absolute path to SQLite file (e.g. `C:\MeatShop\data\db.sqlite3` in production). |
 
 ---
@@ -50,7 +50,7 @@ Environment settings are configured via `.env` (derived from `.env.example`).
 
 - **Storage Invariant**: Every monetary database field (`price_per_unit_rial`, `total_price_rial`, `line_total_rial`, etc.) stores whole-number **Rial** values as positive integers.
 - **Conversion Rule**: `1 Toman = 10 Rial`.
-- **Presentation Layer**: When `CURRENCY_DISPLAY_UNIT=TOMAN`, values are displayed in Toman (`amount_rial // 10`) with Persian formatting. When `CURRENCY_DISPLAY_UNIT=RIAL`, values are displayed in Rial.
+- **Presentation Layer**: Every monetary display (screens, A5 printouts, lists, reports) shows Rial through one shared formatter (`sales.date_utils.format_rial` / template filters `rial` and `thousands`; `formatRial` in `base.html` for live previews): Persian digits with `,` thousands separators, e.g. `۱۲,۵۰۰,۰۰۰ ریال`. Toman (`amount_rial // 10`) is used only as an approximate hint under price-entry fields. Formatting never changes stored values.
 - **No Floating-Point Financials**: Avoid binary float calculations; use integer Rial or `Decimal` throughout calculation pipelines.
 - **Invoice Line Calculation** (`sales.services.calculate_line_total_rial`): `line_total_rial = weight_kg × unit_price_rial` (or `quantity × unit_price_rial` for non-kg units), truncated to whole Rial (`ROUND_DOWN`). `Invoice.total_amount_rial` is the sum of its line totals.
 - **Weight Precision** (`sales.services.normalize_weight_kg`): invoice weights are normalized to 0.001 kg with `ROUND_HALF_EVEN` (the same rule Django uses when reading a stored `DecimalField`) before being saved and before the line total is computed, so the stored weight and the line total always agree. Weights already at 0.001 precision are unchanged; inputs with more than three decimals are rounded first.

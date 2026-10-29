@@ -12,6 +12,7 @@ from .models import (
     Invoice,
     InvoiceItem,
     PhysicalInventoryReconciliation,
+    LOCKED_RECONCILIATION_STATUSES,
 )
 
 
@@ -170,3 +171,21 @@ class PhysicalInventoryReconciliationAdmin(admin.ModelAdmin):
     list_filter = ('status', 'is_parent_pool', 'product__category')
     search_fields = ('document_number', 'product__name', 'notes')
     readonly_fields = ('created_at', 'approved_at')
+
+    @staticmethod
+    def _is_locked(obj):
+        if obj is None or not obj.pk:
+            return False
+        stored_status = PhysicalInventoryReconciliation.objects.filter(pk=obj.pk).values_list('status', flat=True).first()
+        return stored_status in LOCKED_RECONCILIATION_STATUSES
+
+    def get_readonly_fields(self, request, obj=None):
+        # Approved / closed records are immutable; the model and queryset also enforce this
+        if self._is_locked(obj):
+            return [f.name for f in self.model._meta.fields]
+        return super().get_readonly_fields(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        if self._is_locked(obj):
+            return False
+        return super().has_delete_permission(request, obj)

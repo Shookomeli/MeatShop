@@ -137,7 +137,7 @@ class ProductCatalogueTestCase(TestCase):
             p.full_clean()
 
     def test_product_price_display_formatting(self):
-        self.assertEqual(self.product1.price_display, "250,000 تومان")
+        self.assertEqual(self.product1.price_display, "۲,۵۰۰,۰۰۰ ریال")
         p_no_price = Product.objects.create(
             name="سینه موادی بدون قیمت",
             category=self.cat_chicken,

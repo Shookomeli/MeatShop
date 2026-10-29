@@ -1,6 +1,6 @@
 from django import template
 from decimal import Decimal
-from sales.date_utils import to_jalali_date, to_jalali_datetime, to_persian_digits
+from sales.date_utils import to_jalali_date, to_jalali_datetime, to_persian_digits, format_rial, format_thousands
 
 register = template.Library()
 
@@ -36,9 +36,24 @@ def format_weight_kg_filter(value):
         return to_persian_digits(str(value))
 
 
+@register.filter(name='rial')
+def rial_filter(value_rial):
+    """Stored Rial amount with Persian digits, thousands separators and unit: ۱۲,۵۰۰,۰۰۰ ریال."""
+    return format_rial(value_rial)
+
+
+@register.filter(name='thousands')
+def thousands_filter(value):
+    """Number only (Persian digits, thousands separators) for cells whose header names the unit."""
+    return format_thousands(value)
+
+
 @register.filter(name='toman_display')
 def toman_display_filter(value_rial):
-    """Converts whole Rial integer to Toman with comma separation and Persian digits."""
+    """
+    Approximate Toman hint only (Rial // 10), used under price-entry fields.
+    Normal monetary displays use the `rial` / `thousands` filters.
+    """
     if value_rial is None:
         return '۰'
     try:

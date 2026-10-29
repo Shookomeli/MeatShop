@@ -1,10 +1,10 @@
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.conf import settings
 from django.utils import timezone
 from decimal import Decimal
 from products.models import Product
+from .date_utils import format_rial
 
 
 class Operator(models.Model):
@@ -677,6 +677,34 @@ class ReconciliationStatus(models.TextChoices):
     CLOSED = 'CLOSED', 'بسته‌شده / قطعی'
 
 
+LOCKED_RECONCILIATION_STATUSES = (ReconciliationStatus.APPROVED, ReconciliationStatus.CLOSED)
+RECONCILIATION_LOCKED_MESSAGE = "سند انبارگردانی تاییدشده یا بسته‌شده غیرقابل تغییر و بازنویسی است."
+
+
+class ReconciliationQuerySet(models.QuerySet):
+    """
+    Bulk writes bypass Model.save()/delete(), so they are refused whenever any targeted row is
+    stored as APPROVED or CLOSED (bulk_update() is routed through update() by Django).
+    """
+
+    def _refuse_if_locked(self):
+        if self.filter(status__in=LOCKED_RECONCILIATION_STATUSES).exists():
+            raise ValidationError(RECONCILIATION_LOCKED_MESSAGE)
+
+    def update(self, **kwargs):
+        self._refuse_if_locked()
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        # Checked up front so the refusal happens before Django opens its bulk transaction
+        self.filter(pk__in=[obj.pk for obj in objs])._refuse_if_locked()
+        return super().bulk_update(objs, fields, batch_size=batch_size)
+
+    def delete(self):
+        self._refuse_if_locked()
+        return super().delete()
+
+
 class PhysicalInventoryReconciliation(models.Model):
     """
     Physical Inventory Count and Loss Reconciliation record.
@@ -808,6 +836,8 @@ class PhysicalInventoryReconciliation(models.Model):
         verbose_name="یادداشت‌ها و مشاهدات شمارش فیزیکی"
     )
 
+    objects = ReconciliationQuerySet.as_manager()
+
     class Meta:
         verbose_name = "انبارگردانی و مغایرت‌گیری فیزیکی"
         verbose_name_plural = "اسناد انبارگردانی و مغایرت‌گیری فیزیکی"
@@ -850,27 +880,46 @@ class PhysicalInventoryReconciliation(models.Model):
             return f"{self.discrepancy_percentage}%"
         return "N/A"
 
+    def _stored_row(self):
+        if not self.pk:
+            return None
+        return type(self)._base_manager.filter(pk=self.pk).first()
+
+    def _assert_mutation_allowed(self):
+        """
+        Enforced from save() itself (not only via full_clean()): once the stored row is APPROVED or
+        CLOSED nothing may change, except the single transition APPROVED -> CLOSED with all other
+        values identical. The stored status is authoritative over the in-memory one.
+        """
+        orig = self._stored_row()
+        if orig is None or orig.status not in LOCKED_RECONCILIATION_STATUSES:
+            return
+        changed = [
+            f.name for f in self._meta.concrete_fields
+            if f.name != 'status' and getattr(orig, f.attname) != getattr(self, f.attname)
+        ]
+        if changed:
+            raise ValidationError(RECONCILIATION_LOCKED_MESSAGE)
+        allowed = {
+            ReconciliationStatus.APPROVED: (ReconciliationStatus.APPROVED, ReconciliationStatus.CLOSED),
+            ReconciliationStatus.CLOSED: (ReconciliationStatus.CLOSED,),
+        }[orig.status]
+        if self.status not in allowed:
+            raise ValidationError("امکان بازگرداندن وضعیت سند انبارگردانی تاییدشده یا بسته‌شده وجود ندارد.")
+
     def clean(self):
         super().clean()
-        if self.pk:
-            orig = PhysicalInventoryReconciliation.objects.filter(pk=self.pk).first()
-            if orig and orig.status in [ReconciliationStatus.APPROVED, ReconciliationStatus.CLOSED]:
-                if self.status not in [ReconciliationStatus.APPROVED, ReconciliationStatus.CLOSED]:
-                    raise ValidationError("امکان تغییر وضعیت سند انبارگردانی تاییدشده یا بسته‌شده به پیش‌نویس وجود ندارد.")
-                if (
-                    orig.opening_stock_kg != self.opening_stock_kg
-                    or orig.actual_physical_closing_stock_kg != self.actual_physical_closing_stock_kg
-                    or orig.expected_closing_stock_kg != self.expected_closing_stock_kg
-                    or orig.discrepancy_kg != self.discrepancy_kg
-                    or orig.period_start_date != self.period_start_date
-                    or orig.period_end_date != self.period_end_date
-                    or orig.product_id != self.product_id
-                ):
-                    raise ValidationError("سند انبارگردانی تاییدشده یا بسته‌شده غیرقابل تغییر و بازنویسی است.")
+        self._assert_mutation_allowed()
 
     def save(self, *args, **kwargs):
-        self.clean()
+        self._assert_mutation_allowed()
         super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        orig = self._stored_row()
+        if orig is not None and orig.status in LOCKED_RECONCILIATION_STATUSES:
+            raise ValidationError(RECONCILIATION_LOCKED_MESSAGE)
+        return super().delete(*args, **kwargs)
 
 
 class ProcessingReconciliationStatus(models.TextChoices):
@@ -1057,11 +1106,8 @@ class Invoice(models.Model):
 
     @property
     def total_amount_display(self):
-        display_unit = getattr(settings, 'CURRENCY_DISPLAY_UNIT', 'TOMAN')
-        if display_unit == 'TOMAN':
-            toman_val = self.total_amount_rial // 10
-            return f"{toman_val:,} تومان"
-        return f"{self.total_amount_rial:,} ریال"
+        """Stored Rial total formatted for display; the stored value is never rescaled."""
+        return format_rial(self.total_amount_rial)
 
 
 class InvoiceItem(models.Model):
@@ -1130,15 +1176,10 @@ class InvoiceItem(models.Model):
 
     @property
     def unit_price_display(self):
-        display_unit = getattr(settings, 'CURRENCY_DISPLAY_UNIT', 'TOMAN')
-        if display_unit == 'TOMAN':
-            return f"{self.unit_price_rial // 10:,} تومان"
-        return f"{self.unit_price_rial:,} ریال"
+        """Stored Rial unit price formatted for display; the stored value is never rescaled."""
+        return format_rial(self.unit_price_rial)
 
     @property
     def total_price_display(self):
-        display_unit = getattr(settings, 'CURRENCY_DISPLAY_UNIT', 'TOMAN')
-        if display_unit == 'TOMAN':
-            return f"{self.total_price_rial // 10:,} تومان"
-        return f"{self.total_price_rial:,} ریال"
+        return format_rial(self.total_price_rial)
 

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}دسترسی غیرمجاز | واکا پروتئین{% endblock %}
+
+{% block content %}
+<div style="max-width: 560px; margin: 2rem auto; background: var(--bg-surface); border: 1px solid #fca5a5; border-radius: 8px; padding: 1.5rem;">
+    <h1 style="font-size: 1.2rem; font-weight: 700; color: #991b1b; margin-bottom: 0.5rem;">دسترسی به انبارگردانی مجاز نیست</h1>
+    <p style="font-size: 0.9rem; color: var(--text-main); margin-bottom: 1rem;">
+        حساب کاربری «{{ request.user.username }}» مجوز ایجاد، تایید یا بستن اسناد انبارگردانی را ندارد.
+        برای دریافت دسترسی با مدیر سامانه تماس بگیرید.
+    </p>
+    <div style="display: flex; gap: 0.5rem;">
+        <a href="{% url 'report_loss' %}" class="btn btn-secondary">گزارش افت و بازدهی</a>
+        <form method="POST" action="{% url 'logout' %}" style="display: inline;">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-secondary">ورود با حساب دیگر</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

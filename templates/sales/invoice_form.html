@@ -28,7 +28,7 @@ input.item-qty {
             صدور فاکتور فروش رسمی
         </h1>
         <p style="font-size: 0.85rem; color: var(--text-muted);">
-            جستجوی پیشرفته برش‌های گوشت، فیلتر دسته‌بندی، ثبت سطرهای مستقل با قیمت قطعی در زمان صدور و تبدیل ریال به تومان.
+            جستجوی پیشرفته برش‌های گوشت، فیلتر دسته‌بندی، ثبت سطرهای مستقل با قیمت قطعی (ریال) در زمان صدور.
         </p>
     </div>
 
@@ -131,7 +131,7 @@ input.item-qty {
                     <option value="" disabled selected>-- انتخاب کالا از کاتالوگ --</option>
                     {% for p in products %}
                     <option value="{{ p.id }}" data-category="{{ p.category.id }}" data-category-name="{{ p.category.name }}" data-code="{{ p.code|default:'' }}" data-name="{{ p.name }}" data-price="{{ p.price_per_unit_rial|default:0 }}" data-unit="{{ p.unit }}" data-is-parent="{% if p.is_parent %}1{% else %}0{% endif %}">
-                        {% if p.is_parent %}⭐ [کالای والد] {% endif %}{{ p.name }} {% if p.code %}[کد: {{ p.code }}]{% endif %} ({{ p.category.name }}) — قیمت پایه: {{ p.price_per_unit_rial|default:0|fa_digits }} ریال
+                        {% if p.is_parent %}⭐ [کالای والد] {% endif %}{{ p.name }} {% if p.code %}[کد: {{ p.code }}]{% endif %} ({{ p.category.name }}) — قیمت پایه: {{ p.price_per_unit_rial|default:0|rial }}
                     </option>
                     {% endfor %}
                 </select>
@@ -176,7 +176,7 @@ input.item-qty {
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
                 <div>
                     <span style="font-size: 0.85rem; color: var(--text-muted);">مبلغ محاسبه‌شده این سطر:</span>
-                    <strong id="active-calculated-line-total" class="tabular-nums" style="font-size: 1.15rem; color: #1e3a8a; margin-right: 0.35rem;">0 تومان</strong>
+                    <strong id="active-calculated-line-total" class="tabular-nums" style="font-size: 1.15rem; color: #1e3a8a; margin-right: 0.35rem;">۰ ریال</strong>
                 </div>
                 <button type="button" id="btn-add-line-to-table" class="btn btn-success" style="padding: 0.5rem 1.25rem;">
                     ➕ افزودن این سطر به فاکتور
@@ -200,7 +200,7 @@ input.item-qty {
                             <th style="width: 120px;">وزن خالص (kg)</th>
                             <th style="width: 125px; text-align: center;">تعداد</th>
                             <th style="width: 150px;">قیمت واحد (ریال)</th>
-                            <th style="width: 150px;">جمع سطر (تومان)</th>
+                            <th style="width: 150px;">جمع سطر (ریال)</th>
                             <th style="width: 60px; text-align: center;">حذف</th>
                         </tr>
                     </thead>
@@ -219,11 +219,11 @@ input.item-qty {
                 <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 1rem 1.5rem; text-align: left; min-width: 340px;">
                     <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.9rem; color: var(--text-muted);">
                         <span>مبلغ کل فاکتور به ریال:</span>
-                        <strong id="grand-rial-display" class="tabular-nums">0 ریال</strong>
+                        <strong id="grand-rial-display" class="tabular-nums">۰ ریال</strong>
                     </div>
                     <div style="display: flex; justify-content: space-between; font-size: 1.15rem; font-weight: 800; color: #1e3a8a; border-top: 1px solid #93c5fd; padding-top: 0.5rem;">
                         <span>مبلغ قابل پرداخت:</span>
-                        <strong id="grand-toman-display" class="tabular-nums">0 تومان</strong>
+                        <strong id="grand-toman-display" class="tabular-nums">۰ ریال</strong>
                     </div>
                 </div>
             </div>
@@ -377,7 +377,7 @@ input.item-qty {
         const price = parseInt(activePriceInput.value) || 0;
 
         if (price > 0) {
-            pricePreview.textContent = `${(price / 10).toLocaleString('fa-IR')} تومان`;
+            pricePreview.textContent = formatTomanHint(price);
         } else {
             pricePreview.textContent = '';
         }
@@ -387,18 +387,13 @@ input.item-qty {
 
         let lineRial = 0;
         if (unit === 'kg') {
-            lineRial = Math.round(wt * price);
+            lineRial = calcLineTotalRial(wt, price);
         } else {
-            lineRial = Math.round(qty * price);
+            lineRial = calcLineTotalRial(qty, price);
         }
 
-        const lineToman = Math.floor(lineRial / 10);
-        let displayStr = `${lineToman.toLocaleString('fa-IR')} تومان`;
-        if (lineRial % 10 !== 0) {
-            displayStr += ` (${lineRial.toLocaleString('fa-IR')} ریال)`;
-        }
-        activeLineTotalDisplay.textContent = displayStr;
-        return { lineRial, lineToman };
+        activeLineTotalDisplay.textContent = formatRial(lineRial);
+        return { lineRial };
     }
 
     activeWeightInput.addEventListener('input', calculateActiveLine);
@@ -440,7 +435,7 @@ input.item-qty {
         }
 
         const prodName = selectedCardName.textContent;
-        const lineRial = unit === 'kg' ? Math.round(wt * price) : Math.round(qty * price);
+        const lineRial = unit === 'kg' ? calcLineTotalRial(wt, price) : calcLineTotalRial(qty, price);
 
         committedLines.push({
             product_id: parseInt(pid),
@@ -460,7 +455,7 @@ input.item-qty {
         activeQtyInput.value = '1';
         activePriceInput.value = '';
         pricePreview.textContent = '';
-        activeLineTotalDisplay.textContent = '0 تومان';
+        activeLineTotalDisplay.textContent = formatRial(0);
 
         renderCommittedLines();
     });
@@ -480,8 +475,8 @@ input.item-qty {
                 </tr>
             `;
             btnSubmitInvoice.disabled = true;
-            grandRialDisplay.textContent = '0 ریال';
-            grandTomanDisplay.textContent = '0 تومان';
+            grandRialDisplay.textContent = formatRial(0);
+            grandTomanDisplay.textContent = formatRial(0);
             itemsJsonInput.value = '';
             return;
         }
@@ -491,11 +486,7 @@ input.item-qty {
 
         committedLines.forEach((line, idx) => {
             grandRial += line.line_total_rial;
-            const lineToman = Math.floor(line.line_total_rial / 10);
-            let displayToman = `${lineToman.toLocaleString('fa-IR')} تومان`;
-            if (line.line_total_rial % 10 !== 0) {
-                displayToman += ` (${line.line_total_rial.toLocaleString('fa-IR')} ریال)`;
-            }
+            const displayLineTotal = formatThousands(line.line_total_rial);
 
             html += `
                 <tr class="committed-line-row">
@@ -514,11 +505,11 @@ input.item-qty {
                         <input type="hidden" name="quantity" value="${line.quantity}">
                     </td>
                     <td>
-                        <input type="number" min="0" name="items[${idx}][unit_price_rial]" value="${line.unit_price_rial}" class="form-input line-price-input" data-idx="${idx}" dir="ltr" style="font-size: 0.88rem; padding: 0.35rem 0.5rem;">
+                        <input type="number" min="1" step="1" name="items[${idx}][unit_price_rial]" value="${line.unit_price_rial}" class="form-input line-price-input" data-idx="${idx}" dir="ltr" style="font-size: 0.88rem; padding: 0.35rem 0.5rem;">
                         <input type="hidden" name="unit_price_rial" value="${line.unit_price_rial}">
                     </td>
                     <td class="tabular-nums line-total-cell" style="font-weight: 700; color: #1e3a8a;">
-                        ${displayToman}
+                        ${displayLineTotal}
                     </td>
                     <td style="text-align: center;">
                         <button type="button" class="btn btn-danger btn-sm btn-del-line" data-idx="${idx}">×</button>
@@ -529,13 +520,8 @@ input.item-qty {
 
         committedBody.innerHTML = html;
 
-        const grandToman = Math.floor(grandRial / 10);
-        grandRialDisplay.textContent = grandRial.toLocaleString('fa-IR') + ' ریال';
-        let grandTomanStr = grandToman.toLocaleString('fa-IR') + ' تومان';
-        if (grandRial % 10 !== 0) {
-            grandTomanStr += ` (${(grandRial % 10).toLocaleString('fa-IR')} ریال باقی‌مانده)`;
-        }
-        grandTomanDisplay.textContent = grandTomanStr;
+        grandRialDisplay.textContent = formatRial(grandRial);
+        grandTomanDisplay.textContent = formatRial(grandRial);
 
         btnSubmitInvoice.disabled = false;
         itemsJsonInput.value = JSON.stringify(committedLines);
@@ -577,9 +563,9 @@ input.item-qty {
     function recalcLine(idx) {
         const item = committedLines[idx];
         if (item.unit === 'kg') {
-            item.line_total_rial = Math.round(item.net_weight_kg * item.unit_price_rial);
+            item.line_total_rial = calcLineTotalRial(item.net_weight_kg, item.unit_price_rial);
         } else {
-            item.line_total_rial = Math.round(item.quantity * item.unit_price_rial);
+            item.line_total_rial = calcLineTotalRial(item.quantity, item.unit_price_rial);
         }
         renderCommittedLines();
     }

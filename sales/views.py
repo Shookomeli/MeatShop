@@ -1,10 +1,15 @@
 import json
 import csv
+import logging
+import re
+from functools import wraps
 from datetime import datetime, date
 from decimal import Decimal
 from django.utils import timezone
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse, HttpResponseBadRequest, HttpResponse
+from django.core.exceptions import ValidationError
+from django.contrib.auth.views import redirect_to_login
 from django.contrib import messages
 from django.db.models import Q, Sum, Count, Avg, F
 from django.views.decorators.http import require_http_methods
@@ -37,12 +42,18 @@ from .services import (
     finalize_goods_issue,
     finalize_invoice,
     generate_invoice_from_source_documents,
+    resolve_sale_price_default,
+    resolve_purchase_price_default,
+    SALE_PRICE_SOURCE_LABELS,
+    PURCHASE_PRICE_SOURCE_LABELS,
     cancel_invoice,
     calculate_inventory_loss,
     calculate_confirmed_physical_loss,
     calculate_physical_reconciliation,
     approve_physical_reconciliation,
     close_physical_reconciliation,
+    is_user_authorized_for_reconciliation,
+    _previous_closed_period,
     InvalidTareWeightError,
     InsufficientStockError,
     BusinessLogicError,
@@ -60,6 +71,39 @@ from .date_utils import (
 )
 from scale.service import get_scale, get_stable_weight
 from scale.base import ScaleUnavailableError, UnstableWeightError
+
+logger = logging.getLogger(__name__)
+
+
+def _parse_price_rial(value, label: str, required: bool = False):
+    """
+    Backend validation of a submitted unit price in whole Rial (never trusts the browser).
+    Accepts integers or digit strings (Latin/Persian, optional thousands separators); empty means
+    "not entered". Rejects malformed, fractional and negative values; required prices must be > 0.
+    The value is returned unchanged in Rial: no unit conversion happens here.
+    """
+    if value is None or (isinstance(value, str) and value.strip() in ('', 'null')):
+        if required:
+            raise BusinessLogicError(f"قیمت واحد {label} وارد نشده است.")
+        return None
+    if isinstance(value, bool):
+        raise BusinessLogicError(f"قیمت واحد {label} نامعتبر است.")
+    if isinstance(value, int):
+        price = value
+    elif isinstance(value, float):
+        if not value.is_integer():
+            raise BusinessLogicError(f"قیمت واحد {label} باید عدد صحیح به ریال باشد.")
+        price = int(value)
+    else:
+        raw = to_latin_digits(str(value)).replace(',', '').replace('٬', '').strip()
+        if not raw.lstrip('-').isdigit():
+            raise BusinessLogicError(f"قیمت واحد {label} نامعتبر است: «{value}»")
+        price = int(raw)
+    if price < 0:
+        raise BusinessLogicError(f"قیمت واحد {label} نمی‌تواند منفی باشد.")
+    if required and price == 0:
+        raise BusinessLogicError(f"قیمت واحد {label} باید بزرگتر از صفر باشد.")
+    return price
 
 
 # ---------------------------------------------------------------------------
@@ -245,8 +289,7 @@ def goods_receipt_create_view(request):
                     if gross_wt <= Decimal('0.000'):
                         raise BusinessLogicError(f"وزن ناخالص ردیف {idx} باید بزرگتر از صفر باشد.")
 
-                    unit_p = raw.get('unit_price_rial')
-                    unit_price_rial = int(unit_p) if unit_p not in (None, '', 'null') else None
+                    unit_price_rial = _parse_price_rial(raw.get('unit_price_rial'), f"خرید ردیف {idx}")
 
                     tares = []
                     for tr in raw.get('tare_entries', []):
@@ -303,8 +346,7 @@ def goods_receipt_create_view(request):
                 gross_weight = Decimal(gross_weight_str) if gross_weight_str else Decimal('0.000')
                 package_count = request.POST.get('package_count') or None
                 condition_notes = request.POST.get('condition_notes', '').strip()
-                unit_price_str = request.POST.get('unit_price_rial', '').strip()
-                unit_price_rial = int(unit_price_str) if unit_price_str else None
+                unit_price_rial = _parse_price_rial(request.POST.get('unit_price_rial', ''), "خرید")
 
                 tare_ids = request.POST.getlist('tare_type_id')
                 tare_qtys = request.POST.getlist('tare_qty')
@@ -468,7 +510,7 @@ def goods_issue_create_view(request):
                     gross_wt = Decimal(str(raw['gross_weight_kg']))
                     if gross_wt <= Decimal('0.000'):
                         raise BusinessLogicError(f"وزن ناخالص ردیف {idx} باید بزرگتر از صفر باشد.")
-                    u_price = int(raw['unit_price_rial']) if raw.get('unit_price_rial') else None
+                    u_price = _parse_price_rial(raw.get('unit_price_rial'), f"فروش ردیف {idx}")
                     tares = []
                     for tr in raw.get('tare_entries', []):
                         tt_id = int(tr['tare_type_id'])
@@ -516,8 +558,7 @@ def goods_issue_create_view(request):
                 product = get_object_or_404(Product, pk=product_id)
                 gross_weight_str = request.POST.get('gross_weight_kg', '0').strip()
                 gross_weight = Decimal(gross_weight_str) if gross_weight_str else Decimal('0.000')
-                unit_price_str = request.POST.get('unit_price_rial', '').strip()
-                unit_price_rial = int(unit_price_str) if unit_price_str else None
+                unit_price_rial = _parse_price_rial(request.POST.get('unit_price_rial', ''), "فروش")
 
                 tare_ids = request.POST.getlist('tare_type_id')
                 tare_qtys = request.POST.getlist('tare_qty')
@@ -747,6 +788,67 @@ def invoice_create_view(request):
     return render(request, 'sales/invoice_form.html', context)
 
 
+PRICE_OVERRIDE_PREFIX = 'price_override_'
+PRICE_OVERRIDE_KEY_RE = re.compile(r'^(issue_item|issue|receipt_item|receipt)_\d+$')
+
+
+def _attach_source_price_lines(issues, receipts, posted) -> dict:
+    """
+    Annotates each source document with its price-entry lines: form key, default price and the
+    default's source, plus any value the user already entered (kept on validation re-render).
+    Sale defaults never use receipt purchase cost; purchase defaults never use the catalogue price.
+    Returns {form key: human label} for validation messages.
+    """
+    labels = {}
+
+    def line(key, label, weight, default, source, source_labels):
+        labels[key] = f"«{label}»"
+        entered = posted.get(key) if posted else None
+        return {
+            'key': key,
+            'label': label,
+            'weight': weight,
+            'default': default,
+            'source_label': source_labels.get(source, ''),
+            'value': entered if entered is not None else (default if default is not None else ''),
+        }
+
+    for iss in issues:
+        iss.price_lines = []
+        items = list(iss.items.all())
+        if items:
+            for item in items:
+                default, source = resolve_sale_price_default(iss, item)
+                iss.price_lines.append(line(
+                    f"{PRICE_OVERRIDE_PREFIX}issue_item_{item.id}", item.product.name, item.net_weight_kg,
+                    default, source, SALE_PRICE_SOURCE_LABELS,
+                ))
+        elif iss.product:
+            default, source = resolve_sale_price_default(iss)
+            iss.price_lines.append(line(
+                f"{PRICE_OVERRIDE_PREFIX}issue_{iss.id}", iss.product.name, iss.aggregate_net_weight,
+                default, source, SALE_PRICE_SOURCE_LABELS,
+            ))
+
+    for rec in receipts:
+        rec.price_lines = []
+        items = list(rec.items.all())
+        if items:
+            for item in items:
+                default, source = resolve_purchase_price_default(rec, item)
+                rec.price_lines.append(line(
+                    f"{PRICE_OVERRIDE_PREFIX}receipt_item_{item.id}", item.product.name, item.net_weight_kg,
+                    default, source, PURCHASE_PRICE_SOURCE_LABELS,
+                ))
+        elif rec.product:
+            default, source = resolve_purchase_price_default(rec)
+            rec.price_lines.append(line(
+                f"{PRICE_OVERRIDE_PREFIX}receipt_{rec.id}", rec.product.name, rec.aggregate_net_weight,
+                default, source, PURCHASE_PRICE_SOURCE_LABELS,
+            ))
+    return labels
+
+
 def invoice_from_source_view(request):
     """
     Issue official sales or purchase invoice from existing source documents:
@@ -763,6 +865,12 @@ def invoice_from_source_view(request):
         status=DocumentStatus.FINALIZED
     ).prefetch_related('items__product').select_related('product', 'product__category').order_by('-date_time')
 
+    posted = request.POST if request.method == 'POST' else {}
+    issues = list(uninvoiced_issues)
+    receipts = list(uninvoiced_receipts)
+    price_labels = _attach_source_price_lines(issues, receipts, posted)
+    active_tab = request.GET.get('tab', 'sales')
+
     if request.method == 'POST':
         source_type = request.POST.get('source_type', 'SALE').strip()
         buyer_or_supplier_name = request.POST.get('buyer_or_supplier_name', '').strip()
@@ -770,17 +878,23 @@ def invoice_from_source_view(request):
         driver_name = request.POST.get('driver_name', '').strip()
         remarks = request.POST.get('remarks', '').strip()
         idempotency_key = request.POST.get('idempotency_key', '').strip() or None
-
-        prices_override = {}
-        for key, val in request.POST.items():
-            if (key.startswith('price_override_') or key.startswith('unit_price_rial_')) and val:
-                clean_key = key.replace('price_override_', '').replace('unit_price_rial_', '')
-                try:
-                    prices_override[clean_key] = int(val)
-                except ValueError:
-                    pass
+        active_tab = 'purchase' if source_type == 'PURCHASE' else 'sales'
 
         try:
+            # Model-prefixed keys only (issue_item_<id>, issue_<id>, receipt_item_<id>, receipt_<id>)
+            prices_override = {}
+            for key, val in request.POST.items():
+                if not key.startswith(PRICE_OVERRIDE_PREFIX):
+                    continue
+                clean_key = key[len(PRICE_OVERRIDE_PREFIX):]
+                if not PRICE_OVERRIDE_KEY_RE.match(clean_key):
+                    continue
+                price = _parse_price_rial(val, price_labels.get(key, clean_key), required=False)
+                if price is not None:
+                    if price <= 0:
+                        raise BusinessLogicError(f"قیمت واحد {price_labels.get(key, clean_key)} باید بزرگتر از صفر باشد.")
+                    prices_override[clean_key] = price
+
             if source_type == 'SALE':
                 doc_ids_raw = request.POST.getlist('selected_issues')
                 doc_ids = [int(i) for i in doc_ids_raw if i]
@@ -816,10 +930,17 @@ def invoice_from_source_view(request):
         except Exception as e:
             messages.error(request, f"خطای صدور فاکتور از اسناد: {str(e)}")
 
+    selected_issue_ids = {str(i) for i in posted.getlist('selected_issues')} if posted else set()
+    selected_receipt_ids = {str(i) for i in posted.getlist('selected_receipts')} if posted else set()
+    for iss in issues:
+        iss.is_selected = str(iss.id) in selected_issue_ids
+    for rec in receipts:
+        rec.is_selected = str(rec.id) in selected_receipt_ids
+
     context = {
-        'uninvoiced_issues': uninvoiced_issues,
-        'uninvoiced_receipts': uninvoiced_receipts,
-        'active_tab': request.GET.get('tab', 'sales'),
+        'uninvoiced_issues': issues,
+        'uninvoiced_receipts': receipts,
+        'active_tab': active_tab,
     }
     return render(request, 'sales/invoice_from_source.html', context)
 
@@ -866,7 +987,6 @@ def reports_hub_view(request):
 
     context = {
         'total_sales_rial': total_sales_rial,
-        'total_sales_toman': total_sales_rial // 10,
         'total_invoices_count': total_invoices_count,
         'total_receipts_count': total_receipts_count,
         'total_issues_count': total_issues_count,
@@ -964,9 +1084,9 @@ def sales_summary_report_view(request):
         'categories': categories,
         'products': products,
         'total_revenue_rial': total_revenue_rial,
-        'total_revenue_toman': total_revenue_rial // 10,
         'total_sold_weight_kg': total_sold_weight_kg,
-        'invoice_count': invoices.count(),
+        # Invoices that contribute rows under the active category / product filters
+        'invoice_count': items_qs.values('invoice_id').distinct().count(),
         'product_stats': product_stats,
     }
     return render(request, 'sales/report_sales.html', context)
@@ -1190,3 +1310,230 @@ def export_inventory_csv_view(request):
         ])
 
     return response
+
+
+# ---------------------------------------------------------------------------
+# Physical Inventory Reconciliation Workflow (انبارگردانی)
+# All figures are produced by the reconciliation services; views only collect input,
+# call the services and present their results.
+# ---------------------------------------------------------------------------
+
+RECONCILIATION_EDITABLE_STATUSES = (ReconciliationStatus.DRAFT, ReconciliationStatus.CALCULATED)
+
+
+def reconciliation_access_required(view_func):
+    """
+    Server-side guard for every reconciliation page and action: anonymous users go to the in-app
+    login (settings.LOGIN_URL), authenticated users without reconciliation rights get a 403 page in
+    the MeatShop layout. The services check authorization again for approval and closing.
+    """
+    @wraps(view_func)
+    def _wrapped(request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return redirect_to_login(request.get_full_path())
+        if not is_user_authorized_for_reconciliation(request.user):
+            return render(request, 'sales/reconciliation_forbidden.html', status=403)
+        return view_func(request, *args, **kwargs)
+    return _wrapped
+
+
+def _reconciliation_error_message(exc) -> str:
+    if isinstance(exc, ValidationError):
+        return " ".join(exc.messages)
+    return str(exc)
+
+
+def _clean_weight_input(value):
+    """Raw weight text from the form (Persian or Latin digits); the service normalizes and validates it."""
+    value = to_latin_digits((value or '').strip()).replace(',', '').replace('٬', '')
+    return value or None
+
+
+@reconciliation_access_required
+def reconciliation_list_view(request):
+    status_filter = request.GET.get('status', '').strip()
+    reconciliations = PhysicalInventoryReconciliation.objects.select_related(
+        'product', 'product__category', 'created_by', 'approved_by'
+    ).order_by('-period_end_date', '-id')
+    if status_filter in ReconciliationStatus.values:
+        reconciliations = reconciliations.filter(status=status_filter)
+    context = {
+        'reconciliations': reconciliations,
+        'status_choices': ReconciliationStatus.choices,
+        'selected_status': status_filter,
+    }
+    return render(request, 'sales/reconciliation_list.html', context)
+
+
+@reconciliation_access_required
+def reconciliation_create_view(request):
+    products = Product.objects.filter(is_active=True).select_related('category', 'parent').order_by(
+        'category__display_order', 'category__id', '-is_parent', 'name'
+    )
+    form_data = {}
+    form_errors = {}
+
+    if request.method == 'POST':
+        form_data = request.POST.dict()
+        product = None
+        product_id = request.POST.get('product', '').strip()
+        try:
+            product = Product.objects.get(pk=int(product_id), is_active=True)
+        except (Product.DoesNotExist, ValueError, TypeError):
+            form_errors['product'] = "کالا یا سهمیه انبار معتبری انتخاب نشده است."
+
+        dates = {}
+        for field, label in (('start_date', 'تاریخ شروع دوره'), ('end_date', 'تاریخ پایان دوره')):
+            raw = request.POST.get(field, '').strip()
+            if not raw:
+                form_errors[field] = f"{label} الزامی است."
+                continue
+            try:
+                dates[field] = parse_jalali_or_gregorian_date(raw)
+                if dates[field] is None:
+                    raise ValueError
+            except ValueError:
+                form_errors[field] = f"{label} نامعتبر است."
+        if len(dates) == 2 and dates['end_date'] < dates['start_date']:
+            form_errors['end_date'] = "تاریخ پایان دوره نمی‌تواند قبل از تاریخ شروع باشد."
+
+        if not form_errors:
+            opening_raw = _clean_weight_input(request.POST.get('opening_stock'))
+            try:
+                recon = calculate_physical_reconciliation(
+                    product=product,
+                    start_date=dates['start_date'],
+                    end_date=dates['end_date'],
+                    actual_physical_closing_stock=_clean_weight_input(request.POST.get('actual_physical_closing_stock')),
+                    opening_stock=opening_raw,
+                    is_opening_verified=bool(opening_raw) and request.POST.get('is_opening_verified') == 'on',
+                    user=request.user,
+                    notes=request.POST.get('notes', '').strip(),
+                    save_record=True,
+                )
+                messages.success(request, f"سند انبارگردانی «{recon.document_number}» ایجاد و محاسبه شد.")
+                return redirect('reconciliation_detail', pk=recon.pk)
+            except (BusinessLogicError, ValidationError) as e:
+                form_errors['general'] = _reconciliation_error_message(e)
+            except Exception:
+                logger.exception("Unexpected error while creating a physical inventory reconciliation")
+                form_errors['general'] = "خطای غیرمنتظره در ایجاد سند انبارگردانی رخ داد. لطفاً دوباره تلاش کنید."
+
+    context = {
+        'products': products,
+        'form_data': form_data,
+        'form_errors': form_errors,
+    }
+    return render(request, 'sales/reconciliation_form.html', context, status=400 if form_errors else 200)
+
+
+def _reconciliation_detail_context(recon, form_data=None, form_errors=None):
+    prev_period = _previous_closed_period(recon.product, recon.is_parent_pool, recon.period_start_date)
+    adjustment = recon.adjustment_movement
+    return {
+        'recon': recon,
+        'is_editable': recon.status in RECONCILIATION_EDITABLE_STATUSES,
+        'can_approve': recon.status == ReconciliationStatus.CALCULATED and recon.is_complete,
+        'can_close': recon.status == ReconciliationStatus.APPROVED,
+        'previous_period': prev_period,
+        'adjustment': adjustment,
+        'form_data': form_data or {},
+        'form_errors': form_errors or {},
+    }
+
+
+@reconciliation_access_required
+def reconciliation_detail_view(request, pk):
+    recon = get_object_or_404(
+        PhysicalInventoryReconciliation.objects.select_related(
+            'product', 'product__category', 'created_by', 'approved_by', 'adjustment_movement'
+        ),
+        pk=pk,
+    )
+    return render(request, 'sales/reconciliation_detail.html', _reconciliation_detail_context(recon))
+
+
+@reconciliation_access_required
+@require_http_methods(["POST"])
+def reconciliation_count_view(request, pk):
+    """Records / corrects the physically weighed closing stock and recalculates through the service."""
+    recon = get_object_or_404(PhysicalInventoryReconciliation.objects.select_related('product'), pk=pk)
+    form_data = request.POST.dict()
+    if recon.status not in RECONCILIATION_EDITABLE_STATUSES:
+        messages.error(request, "سند انبارگردانی تاییدشده یا بسته‌شده قابل ویرایش نیست.")
+        return redirect('reconciliation_detail', pk=recon.pk)
+
+    previous_period = _previous_closed_period(recon.product, recon.is_parent_pool, recon.period_start_date)
+    # With an approved previous period the service takes the opening from its physical count
+    opening_raw = None if previous_period else _clean_weight_input(request.POST.get('opening_stock'))
+    try:
+        calculate_physical_reconciliation(
+            product=recon.product,
+            start_date=recon.period_start_date,
+            end_date=recon.period_end_date,
+            actual_physical_closing_stock=_clean_weight_input(request.POST.get('actual_physical_closing_stock')),
+            opening_stock=opening_raw,
+            is_opening_verified=bool(opening_raw) and request.POST.get('is_opening_verified') == 'on',
+            is_parent_pool=recon.is_parent_pool,
+            user=request.user,
+            notes=request.POST.get('notes', recon.notes).strip(),
+            save_record=True,
+            reconciliation_instance=recon,
+        )
+        messages.success(request, "موجودی توزین‌شده ثبت و انبارگردانی مجدداً محاسبه شد.")
+        return redirect('reconciliation_detail', pk=recon.pk)
+    except (BusinessLogicError, ValidationError) as e:
+        error = _reconciliation_error_message(e)
+    except Exception:
+        logger.exception("Unexpected error while recording a physical count (reconciliation %s)", recon.pk)
+        error = "خطای غیرمنتظره در ثبت موجودی توزین‌شده رخ داد. لطفاً دوباره تلاش کنید."
+
+    recon.refresh_from_db()
+    context = _reconciliation_detail_context(recon, form_data=form_data, form_errors={'general': error})
+    return render(request, 'sales/reconciliation_detail.html', context, status=400)
+
+
+@reconciliation_access_required
+@require_http_methods(["POST"])
+def reconciliation_approve_view(request, pk):
+    recon = get_object_or_404(PhysicalInventoryReconciliation, pk=pk)
+    apply_adjustment = request.POST.get('apply_stock_adjustment') == 'on'
+    if apply_adjustment and request.POST.get('confirm_stock_adjustment') != 'on':
+        messages.error(request, "برای ثبت تعدیل در دفتر انبار، تأیید آگاهی از تغییر موجودی دفتری الزامی است.")
+        return redirect('reconciliation_detail', pk=recon.pk)
+    try:
+        approved = approve_physical_reconciliation(
+            recon,
+            user=request.user,
+            notes=request.POST.get('approval_notes', '').strip(),
+            apply_stock_adjustment=apply_adjustment,
+        )
+        if approved.adjustment_movement_id:
+            messages.success(
+                request,
+                f"سند «{approved.document_number}» تایید شد؛ گردش تعدیل انبار به میزان "
+                f"{to_persian_digits(f'{approved.adjustment_movement.net_weight_kg:.3f}')} کیلوگرم ثبت گردید.",
+            )
+        else:
+            messages.success(request, f"سند «{approved.document_number}» تایید شد. هیچ تعدیلی در دفتر انبار ثبت نشد.")
+    except (BusinessLogicError, ValidationError) as e:
+        messages.error(request, _reconciliation_error_message(e))
+    except Exception:
+        logger.exception("Unexpected error while approving reconciliation %s", recon.pk)
+        messages.error(request, "خطای غیرمنتظره در تایید سند انبارگردانی رخ داد.")
+    return redirect('reconciliation_detail', pk=recon.pk)
+
+
+@reconciliation_access_required
+@require_http_methods(["POST"])
+def reconciliation_close_view(request, pk):
+    recon = get_object_or_404(PhysicalInventoryReconciliation, pk=pk)
+    try:
+        closed = close_physical_reconciliation(recon, user=request.user)
+        messages.success(request, f"سند «{closed.document_number}» به‌صورت قطعی بسته شد.")
+    except (BusinessLogicError, ValidationError) as e:
+        messages.error(request, _reconciliation_error_message(e))
+    except Exception:
+        logger.exception("Unexpected error while closing reconciliation %s", recon.pk)
+        messages.error(request, "خطای غیرمنتظره در بستن سند انبارگردانی رخ داد.")
+    return redirect('reconciliation_detail', pk=recon.pk)

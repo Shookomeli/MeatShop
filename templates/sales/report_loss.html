@@ -215,6 +215,9 @@
                 <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0;">
                     فرمول معتبر: موجودی مورد انتظار = اول دوره + ورودی‌ها - خروجی‌ها | مغایرت (کسری/مازاد) = موجودی مورد انتظار - موجودی عینی فیزیکی
                 </p>
+                <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0;" id="recon-sources-note">
+                    ورودی‌ها و خروجی‌ها فقط از گردش‌های انبار رسیدها، حواله‌ها و فرآوری‌های نهایی محاسبه می‌شوند؛ فاکتورها (صدور، ابطال یا صدور مجدد) تأثیری بر آن‌ها ندارند. موجودی اول هر دوره برابر موجودی عینی توزین‌شده دوره تاییدشده قبلی است.
+                </p>
             </div>
         </div>
 
@@ -260,7 +263,7 @@
                 <tbody>
                     {% for rec in reconciliations %}
                     <tr>
-                        <td class="tabular-nums font-mono" style="font-weight: 600;">{{ rec.document_number }}</td>
+                        <td class="tabular-nums font-mono" style="font-weight: 600;"><a href="{% url 'reconciliation_detail' rec.pk %}" style="text-decoration: none;">{{ rec.document_number }}</a></td>
                         <td>{{ rec.product.name }}{% if rec.is_parent_pool %} <small style="color: var(--primary);">(سهمیه والد)</small>{% endif %}</td>
                         <td class="tabular-nums">{{ rec.period_start_date|jdate }} تا {{ rec.period_end_date|jdate }}</td>
                         <td class="tabular-nums">{% if rec.opening_stock_kg is not None %}{{ rec.opening_stock_kg|format_weight_kg }}{% else %}—{% endif %}</td>
@@ -298,6 +301,72 @@
         </div>
         {% endif %}
 
+        <!-- Calculated, not yet approved: potential loss / surplus awaiting review -->
+        <div style="margin-top: 1.25rem;">
+            <h3 style="font-size: 0.95rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.25rem;">
+                ⏳ مغایرت‌های در انتظار بررسی و تایید
+            </h3>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+                کسری احتمالی فقط پس از تایید مجاز به عنوان افت قطعی ثبت می‌شود. موجودی عینی باقی‌مانده همچنان موجودی انبار است و افت محسوب نمی‌شود.
+            </p>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
+                <div style="border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; border-top: 4px solid #d97706;">
+                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem;">کسری احتمالی (نیازمند تایید)</div>
+                    <div style="font-size: 1.35rem; font-weight: 800; color: #d97706;" class="tabular-nums" id="pending-loss-kg">
+                        {{ physical_loss.pending_potential_loss_kg|format_weight_kg }}
+                    </div>
+                </div>
+                <div style="border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; border-top: 4px solid #0f766e;">
+                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem;">مازاد در انتظار تایید</div>
+                    <div style="font-size: 1.35rem; font-weight: 800; color: #0f766e;" class="tabular-nums">
+                        {{ physical_loss.pending_surplus_kg|format_weight_kg }}
+                    </div>
+                </div>
+            </div>
+            {% if physical_loss.pending_review_records %}
+            <div class="table-responsive">
+                <table class="data-table" style="font-size: 0.82rem;">
+                    <thead>
+                        <tr>
+                            <th>شماره سند</th>
+                            <th>کالا / حوزه</th>
+                            <th>بازه زمانی</th>
+                            <th>اول دوره (kg)</th>
+                            <th>ورودی (kg)</th>
+                            <th>خروجی (kg)</th>
+                            <th>مورد انتظار (kg)</th>
+                            <th>شمارش فیزیکی (kg)</th>
+                            <th>مغایرت (kg)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for rec in physical_loss.pending_review_records %}
+                        <tr>
+                            <td class="tabular-nums font-mono" style="font-weight: 600;"><a href="{% url 'reconciliation_detail' rec.pk %}" style="text-decoration: none;">{{ rec.document_number }}</a></td>
+                            <td>{{ rec.product.name }}{% if rec.is_parent_pool %} <small style="color: var(--primary);">(سهمیه والد)</small>{% endif %}</td>
+                            <td class="tabular-nums">{{ rec.period_start_date|jdate }} تا {{ rec.period_end_date|jdate }}</td>
+                            <td class="tabular-nums">{{ rec.opening_stock_kg|format_weight_kg }}</td>
+                            <td class="tabular-nums" style="color: #1e3a8a;">{{ rec.period_receipts_kg|format_weight_kg }}</td>
+                            <td class="tabular-nums" style="color: #15803d;">{{ rec.period_issues_kg|format_weight_kg }}</td>
+                            <td class="tabular-nums" style="font-weight: 600;">{{ rec.expected_closing_stock_kg|format_weight_kg }}</td>
+                            <td class="tabular-nums" style="font-weight: 700; color: #4338ca;">{{ rec.actual_physical_closing_stock_kg|format_weight_kg }}</td>
+                            <td class="tabular-nums">
+                                {% if rec.discrepancy_kg > 0 %}
+                                    <span style="color: #d97706; font-weight: 700;">{{ rec.discrepancy_kg|format_weight_kg }} (کسری احتمالی – نیازمند تایید)</span>
+                                {% elif rec.discrepancy_kg < 0 %}
+                                    <span style="color: #15803d; font-weight: 700;">{{ rec.discrepancy_kg|format_weight_kg }} (مازاد)</span>
+                                {% else %}
+                                    <span style="color: #0f766e; font-weight: 600;">تراز کامل (۰)</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </div>
+
         {% if excluded_reconciliations %}
         <div style="margin-top: 1rem;">
             <h3 style="font-size: 0.9rem; font-weight: 700; color: var(--text-muted); margin-bottom: 0.5rem;">
@@ -305,7 +374,7 @@
             </h3>
             <ul style="font-size: 0.8rem; color: var(--text-muted); margin: 0; padding-inline-start: 1.25rem;">
                 {% for rec in excluded_reconciliations %}
-                <li class="tabular-nums">{{ rec.document_number }} — {{ rec.product.name }} — {{ rec.period_start_date|jdate }} تا {{ rec.period_end_date|jdate }} — {{ rec.get_status_display }}</li>
+                <li class="tabular-nums"><a href="{% url 'reconciliation_detail' rec.pk %}" style="text-decoration: none;">{{ rec.document_number }}</a> — {{ rec.product.name }} — {{ rec.period_start_date|jdate }} تا {{ rec.period_end_date|jdate }} — {{ rec.get_status_display }}</li>
                 {% endfor %}
             </ul>
         </div>

@@ -43,6 +43,57 @@
     .print-only {
         display: block !important;
     }
+
+    /* A5 fit (148mm − 2×8mm page margin): compact the three header blocks only */
+    .invoice-card { padding: 4mm !important; }
+    .invoice-card .doc-header {
+        padding-bottom: 2mm !important;
+        margin-bottom: 2mm !important;
+        gap: 3mm;
+        font-size: 8.5pt !important;
+        line-height: 1.35 !important;
+    }
+    .invoice-card .doc-header * { font-size: 8.5pt !important; line-height: 1.35 !important; }
+    .invoice-card .doc-header h1.doc-shop-title { font-size: 12pt !important; }
+    .invoice-card .doc-header .doc-number { font-size: 10pt !important; }
+    .invoice-card .doc-header .status-badge { padding: 0 4px !important; }
+    .invoice-card .doc-parties {
+        padding: 2mm 3mm !important;
+        margin-bottom: 3mm !important;
+        gap: 1mm 4mm !important;
+        font-size: 8.5pt !important;
+        line-height: 1.35 !important;
+    }
+    .invoice-card .doc-parties * { font-size: 8.5pt !important; }
+
+    /* Items table: never clipped, fixed print column widths overriding the screen px widths */
+    .invoice-card .table-responsive { overflow: visible !important; border: none !important; }
+    .invoice-card table.data-table { width: 100% !important; table-layout: fixed; font-size: 8.5pt !important; }
+    .invoice-card table.data-table th,
+    .invoice-card table.data-table td {
+        white-space: normal !important;
+        overflow-wrap: anywhere;
+        padding: 3px 4px !important;
+        min-width: 0 !important;
+    }
+    .invoice-card table.data-table tr { page-break-inside: avoid; }
+    .invoice-card th.col-idx { width: 8% !important; white-space: nowrap !important; }
+    .invoice-card th.col-qty { width: 8% !important; }
+    .invoice-card th.col-weight { width: 13% !important; }
+    .invoice-card th.col-price { width: 22% !important; }
+    .invoice-card th.col-total { width: 24% !important; }
+    .invoice-card td.money-cell, .invoice-card .money-cell {
+        white-space: nowrap !important;
+        overflow-wrap: normal !important;
+    }
+    .invoice-card .invoice-total-box {
+        min-width: 0 !important;
+        padding: 2mm 4mm !important;
+        page-break-inside: avoid;
+    }
+    .invoice-card .invoice-total-box > div { font-size: 11pt !important; }
+    .invoice-card .invoice-total-row { margin-bottom: 3mm !important; }
+    .invoice-card .signatures-block { margin-top: 4mm !important; padding-top: 3mm !important; page-break-inside: avoid; }
 }
 </style>
 {% endblock %}
@@ -82,10 +133,10 @@
     <!-- Official Printable Invoice Sheet (Standardized to A5) -->
     <div class="invoice-card" style="background-color: var(--bg-surface); border: 2px solid var(--border-color); border-radius: 8px; padding: 1.5rem;">
         <!-- Header -->
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1rem;">
-            <div>
+        <div class="doc-header" style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1rem;">
+            <div class="doc-title-block">
                 <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
-                    <h1 style="font-size: 1.3rem; font-weight: 800; color: var(--primary);">
+                    <h1 class="doc-shop-title" style="font-size: 1.3rem; font-weight: 800; color: var(--primary);">
                         واکا پروتئین (Vaka Protein)
                     </h1>
                     <span class="status-badge {% if invoice.invoice_type == 'PURCHASE' %}status-inactive{% else %}status-active{% endif %}" style="font-size: 0.8rem;">
@@ -101,9 +152,9 @@
                     فاکتور رسمی و سند تسویه مالی | صاحب کالا: {{ invoice.goods_owner_name|default:"واکا پروتئین" }}
                 </div>
             </div>
-            <div style="text-align: left;">
+            <div class="doc-meta" style="text-align: left;">
                 <div style="font-size: 0.8rem; color: var(--text-muted);">شماره فاکتور:</div>
-                <strong style="font-size: 1.15rem; color: #1e3a8a;" class="tabular-nums">{{ invoice.document_number }}</strong>
+                <strong style="font-size: 1.15rem; color: #1e3a8a;" class="tabular-nums doc-number">{{ invoice.document_number }}</strong>
                 <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">
                     تاریخ: <span class="tabular-nums">{{ invoice.date|jdate }}</span>
                 </div>
@@ -116,7 +167,7 @@
         </div>
 
         <!-- Party Information -->
-        <div style="background: #f8fafc; border: 1px solid var(--border-subtle); border-radius: 6px; padding: 0.85rem 1rem; margin-bottom: 1.25rem; display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; font-size: 0.9rem;">
+        <div class="doc-parties" style="background: #f8fafc; border: 1px solid var(--border-subtle); border-radius: 6px; padding: 0.85rem 1rem; margin-bottom: 1.25rem; display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; font-size: 0.9rem;">
             <div>
                 <span style="color: var(--text-muted);">
                     {% if invoice.invoice_type == 'PURCHASE' %}تأمین‌کننده / فروشنده:{% else %}خریدار / مشتری:{% endif %}
@@ -160,19 +211,19 @@
             <table class="data-table" style="font-size: 0.9rem;">
                 <thead>
                     <tr>
-                        <th style="width: 45px; text-align: center;">ردیف</th>
-                        <th>شرح کالا / قطعه گوشت</th>
-                        <th style="width: 105px; min-width: 95px; text-align: center;">تعداد</th>
-                        <th style="width: 120px; text-align: center;">وزن خالص</th>
-                        <th style="width: 150px; text-align: left;">قیمت واحد</th>
-                        <th style="width: 160px; text-align: left;">مبلغ کل (تومان)</th>
+                        <th class="col-idx" style="width: 45px; text-align: center;">ردیف</th>
+                        <th class="col-name">شرح کالا / قطعه گوشت</th>
+                        <th class="col-qty" style="width: 105px; min-width: 95px; text-align: center;">تعداد</th>
+                        <th class="col-weight" style="width: 120px; text-align: center;">وزن خالص (kg)</th>
+                        <th class="col-price" style="width: 150px; text-align: left;">قیمت واحد (ریال)</th>
+                        <th class="col-total" style="width: 160px; text-align: left;">مبلغ کل (ریال)</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for item in invoice.items.all %}
                     <tr>
                         <td class="tabular-nums" style="text-align: center; color: var(--text-muted); font-size: 0.8rem;">
-                            {{ forloop.counter }}
+                            {{ forloop.counter|fa_digits }}
                         </td>
                         <td>
                             <strong>{{ item.product_name_snapshot }}</strong>
@@ -192,11 +243,11 @@
                         <td class="tabular-nums" style="text-align: center; font-weight: 600;">
                             {{ item.net_weight_kg|format_weight_kg }}
                         </td>
-                        <td class="tabular-nums" style="text-align: left; font-size: 0.85rem;">
-                            {{ item.unit_price_display }}
+                        <td class="tabular-nums money-cell" style="text-align: left; font-size: 0.85rem;">
+                            {{ item.unit_price_rial|thousands }}
                         </td>
-                        <td class="tabular-nums" style="text-align: left; font-weight: 700; color: #1e3a8a;">
-                            {{ item.total_price_display }}
+                        <td class="tabular-nums money-cell" style="text-align: left; font-weight: 700; color: #1e3a8a;">
+                            {{ item.total_price_rial|thousands }}
                         </td>
                     </tr>
                     {% endfor %}
@@ -205,21 +256,17 @@
         </div>
 
         <!-- Grand Total Summary -->
-        <div style="display: flex; justify-content: flex-end; margin-bottom: 2rem;">
-            <div style="background: #eff6ff; border: 2px solid #bfdbfe; border-radius: 8px; padding: 1rem 1.5rem; text-align: left; min-width: 320px;">
-                <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.4rem;">
-                    <span>مبلغ به ریال:</span>
-                    <strong class="tabular-nums">{{ invoice.total_amount_rial|fa_digits }} ریال</strong>
-                </div>
-                <div style="display: flex; justify-content: space-between; font-size: 1.25rem; font-weight: 800; color: #15803d; border-top: 1px solid #93c5fd; padding-top: 0.5rem;">
-                    <span>مبلغ نهایی (تومان):</span>
-                    <strong class="tabular-nums">{{ invoice.total_amount_display }}</strong>
+        <div class="invoice-total-row" style="display: flex; justify-content: flex-end; margin-bottom: 2rem;">
+            <div class="invoice-total-box" style="background: #eff6ff; border: 2px solid #bfdbfe; border-radius: 8px; padding: 1rem 1.5rem; text-align: left; min-width: 320px;">
+                <div style="display: flex; justify-content: space-between; gap: 1rem; font-size: 1.25rem; font-weight: 800; color: #15803d;">
+                    <span>مبلغ نهایی فاکتور:</span>
+                    <strong class="tabular-nums money-cell" id="invoice-grand-total">{{ invoice.total_amount_rial|rial }}</strong>
                 </div>
             </div>
         </div>
 
         <!-- Signatures Footer -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; border-top: 1px dashed var(--border-color); padding-top: 1.5rem; text-align: center; font-size: 0.85rem; color: var(--text-muted);">
+        <div class="signatures-block" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; border-top: 1px dashed var(--border-color); padding-top: 1.5rem; text-align: center; font-size: 0.85rem; color: var(--text-muted);">
             <div>
                 امضای صادرکننده
                 <div style="height: 50px;"></div>

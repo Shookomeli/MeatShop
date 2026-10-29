@@ -195,8 +195,8 @@ class Phase4DataModelsTestCase(TestCase):
             total_price_rial=50000000,
         )
         self.assertEqual(item.product_name_snapshot, "سینه سایز")
-        self.assertEqual(inv.total_amount_display, "5,000,000 تومان")
-        self.assertEqual(item.unit_price_display, "200,000 تومان")
+        self.assertEqual(inv.total_amount_display, "۵۰,۰۰۰,۰۰۰ ریال")
+        self.assertEqual(item.unit_price_display, "۲,۰۰۰,۰۰۰ ریال")
 
     def test_processing_record_and_lines(self):
         output_product = Product.objects.create(
@@ -378,7 +378,7 @@ class Phase5BusinessServicesTestCase(TestCase):
             items_data=items,
         )
         self.assertEqual(invoice.total_amount_rial, 100000000)
-        self.assertEqual(invoice.total_amount_display, "10,000,000 تومان")
+        self.assertEqual(invoice.total_amount_display, "۱۰۰,۰۰۰,۰۰۰ ریال")
         self.assertEqual(invoice.items.count(), 2)
 
         item1 = invoice.items.first()
@@ -2137,7 +2137,7 @@ class InvoiceProductSearchAndCalculationTestCase(TestCase):
         )
         self.assertEqual(inv.items.count(), 2)
         self.assertEqual(inv.total_amount_rial, 22500000)
-        self.assertEqual(inv.total_amount_display, "2,250,000 تومان")
+        self.assertEqual(inv.total_amount_display, "۲۲,۵۰۰,۰۰۰ ریال")
 
     def test_invoice_from_source_traceability(self):
         # Multi-item goods receipt
@@ -3864,11 +3864,11 @@ class Phase8InvoiceHistoryTestCase(TestCase):
         self.product.save()
 
         # Verify invoice detail retains the old historical price (2,500,000 Rial)
-        # Using Toman presentation (250,000 Toman)
+        # Rial presentation of the stored snapshot
         res = self.client.get(reverse('invoice_detail', args=[inv.pk]))
         self.assertEqual(res.status_code, 200)
-        self.assertContains(res, "250,000 تومان")
-        self.assertNotContains(res, "999,000 تومان")
+        self.assertContains(res, "۲,۵۰۰,۰۰۰")
+        self.assertNotContains(res, "۹,۹۹۰,۰۰۰")
 
     def test_export_csv_handles_invalid_dates_safely(self):
         from django.urls import reverse
@@ -4076,7 +4076,7 @@ class ConfirmedPhysicalLossReportTestCase(TestCase):
         self._recon(self.parent_a, oct1, oct7, "500.000", "480.000")                 # shortage 20
         self._recon(self.child_a, oct1, oct7, "100.000", "95.500", close=True)       # shortage 4.5, CLOSED
         self._recon(self.parent_b, oct1, oct7, "200.000", "210.000")                 # surplus 10
-        self._recon(self.parent_b, oct1, oct7, "50.000", "50.000")                   # exact match
+        self._recon(self.parent_b, date(2026, 10, 8), date(2026, 10, 14), "210.000", "210.000")  # exact match
         res = self._loss()
         self.assertEqual(res['confirmed_loss_kg'], Decimal("24.500"))
         self.assertEqual(res['confirmed_surplus_kg'], Decimal("10.000"))
@@ -4087,7 +4087,7 @@ class ConfirmedPhysicalLossReportTestCase(TestCase):
         from sales.models import PhysicalInventoryReconciliation, ReconciliationStatus
         oct1, oct7 = date(2026, 10, 1), date(2026, 10, 7)
         draft = self._recon(self.parent_a, oct1, oct7, "500.000", None, approve=False)
-        calculated = self._recon(self.parent_a, oct1, oct7, "500.000", "400.000", approve=False)
+        calculated = self._recon(self.parent_a, date(2026, 10, 8), date(2026, 10, 14), "500.000", "400.000", approve=False)
         self.assertEqual(draft.status, ReconciliationStatus.DRAFT)
         self.assertEqual(calculated.status, ReconciliationStatus.CALCULATED)
         # An APPROVED record that is incomplete (e.g. status set outside the approval workflow)
@@ -4158,10 +4158,12 @@ class ConfirmedPhysicalLossReportTestCase(TestCase):
         self.assertEqual(response.context['physical_loss']['confirmed_loss_kg'], Decimal("0.000"))
 
     def test_report_view_summary_matches_displayed_records_without_truncation(self):
+        # 30 consecutive daily periods, each opening at the previous day's physical count, 1 kg short each
         for i in range(30):
-            self._recon(self.parent_a, date(2026, 10, 1), date(2026, 10, 7), "100.000", "99.000")  # 1 kg each
+            day = date(2026, 10, 1 + i)
+            self._recon(self.parent_a, day, day, f"{100 - i}.000", f"{99 - i}.000")
         self._recon(self.parent_b, date(2026, 10, 1), date(2026, 10, 7), "100.000", "105.000")     # surplus
-        self._recon(self.parent_a, date(2026, 10, 1), date(2026, 10, 7), "100.000", None, approve=False)
+        self._recon(self.parent_a, date(2026, 10, 31), date(2026, 10, 31), "70.000", None, approve=False)
 
         response = self.client.get(
             reverse('report_loss') + f'?preset=custom&start_date=2026-10-01&end_date=2026-10-31&parent_id={self.parent_a.id}'
@@ -4175,3 +4177,1319 @@ class ConfirmedPhysicalLossReportTestCase(TestCase):
         self.assertEqual(len(response.context['excluded_reconciliations']), 1)
         self.assertContains(response, "کسری فیزیکی تاییدشده")
         self.assertContains(response, "تراز تئوریک مبتنی بر گردش انبار")
+
+
+class PhysicalWeighingLossPeriodTestCase(TestCase):
+    """Loss is measured by physically weighing remaining stock; periods chain on the actual count and never double count."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        self.cat = get_test_category("مرغ", "chicken")
+        self.parent = Product.objects.create(name="مرغ کامل توزین", category=self.cat, is_parent=True, unit="kg")
+        self.admin = User.objects.create_user(username="weigh_admin", password="x", is_staff=True)
+
+    def _receipt(self, doc, kg, day):
+        finalize_goods_receipt(
+            document_number=doc, supplier_name="کشتارگاه", product=self.parent,
+            gross_weight_kg=Decimal(kg), tare_entries=[], document_date=day,
+        )
+
+    def _issue(self, doc, kg, day):
+        return finalize_goods_issue(
+            document_number=doc, product=self.parent, gross_weight_kg=Decimal(kg), tare_entries=[],
+            goods_owner_name="واکا", recipient_name="مشتری", document_date=day,
+        )
+
+    def _calc(self, start, end, actual, opening=None, save=True, instance=None):
+        from sales.services import calculate_physical_reconciliation
+        return calculate_physical_reconciliation(
+            product=self.parent, start_date=start, end_date=end,
+            opening_stock=Decimal(opening) if opening is not None else None,
+            is_opening_verified=opening is not None,
+            actual_physical_closing_stock=Decimal(actual) if actual is not None else None,
+            save_record=save, reconciliation_instance=instance,
+        )
+
+    def _approve(self, recon, adjust=False):
+        from sales.services import approve_physical_reconciliation
+        return approve_physical_reconciliation(recon, user=self.admin, apply_stock_adjustment=adjust)
+
+    def _loss(self):
+        from sales.services import calculate_confirmed_physical_loss
+        return calculate_confirmed_physical_loss()
+
+    def _period1(self):
+        """Opening 0, inbound 200, outbound 180, physically weighed 15 kg."""
+        self._receipt("REC-W-01", "200.000", date(2026, 10, 2))
+        self._issue("ISS-W-01", "180.000", date(2026, 10, 5))
+        return self._calc(date(2026, 10, 1), date(2026, 10, 7), "15.000", opening="0.000")
+
+    def test_example_potential_loss_is_expected_minus_physical_count(self):
+        from sales.models import ReconciliationStatus
+        recon = self._period1()
+        self.assertEqual(recon.opening_stock_kg, Decimal("0.000"))
+        self.assertEqual(recon.period_receipts_kg, Decimal("200.000"))
+        self.assertEqual(recon.period_issues_kg, Decimal("180.000"))
+        self.assertEqual(recon.expected_closing_stock_kg, Decimal("20.000"))
+        self.assertEqual(recon.actual_physical_closing_stock_kg, Decimal("15.000"))
+        self.assertEqual(recon.discrepancy_kg, Decimal("5.000"))
+        self.assertEqual(recon.discrepancy_type, 'SHORTAGE')
+        # Not approved automatically: potential loss for review only
+        self.assertEqual(recon.status, ReconciliationStatus.CALCULATED)
+        res = self._loss()
+        self.assertEqual(res['confirmed_loss_kg'], Decimal("0.000"))
+        self.assertEqual(res['pending_potential_loss_kg'], Decimal("5.000"))
+        self.assertEqual([r.pk for r in res['pending_review_records']], [recon.pk])
+
+    def test_next_period_opens_at_previous_physical_count(self):
+        p1 = self._approve(self._period1())
+        self._receipt("REC-W-02", "100.000", date(2026, 10, 9))
+        self._issue("ISS-W-02", "90.000", date(2026, 10, 12))
+        p2 = self._calc(date(2026, 10, 8), date(2026, 10, 14), "24.000")
+        # 15 kg physically remained: neither the expected 20 nor 15 + 5 loss
+        self.assertEqual(p2.opening_stock_kg, Decimal("15.000"))
+        self.assertTrue(p2.is_opening_verified)
+        self.assertEqual(p2.period_receipts_kg, Decimal("100.000"))
+        self.assertEqual(p2.period_issues_kg, Decimal("90.000"))
+        self.assertEqual(p2.expected_closing_stock_kg, Decimal("25.000"))
+        self.assertEqual(p2.discrepancy_kg, Decimal("1.000"))
+        self._approve(p2)
+        p1.refresh_from_db()
+        self.assertEqual(p1.discrepancy_kg, Decimal("5.000"))
+        res = self._loss()
+        self.assertEqual(res['confirmed_loss_kg'], Decimal("6.000"))
+        self.assertEqual(res['pending_review_records'], [])
+
+    def test_negative_discrepancy_is_surplus_not_loss(self):
+        from sales.models import ReconciliationStatus
+        recon = self._calc(date(2026, 10, 1), date(2026, 10, 7), "12.000", opening="10.000")
+        self.assertEqual(recon.discrepancy_kg, Decimal("-2.000"))
+        self.assertEqual(recon.discrepancy_type, 'SURPLUS')
+        self.assertEqual(recon.status, ReconciliationStatus.CALCULATED)
+        res = self._loss()
+        self.assertEqual(res['pending_surplus_kg'], Decimal("2.000"))
+        self.assertEqual(res['pending_potential_loss_kg'], Decimal("0.000"))
+        self.assertEqual(res['confirmed_loss_kg'], Decimal("0.000"))
+        self.assertEqual(res['confirmed_surplus_kg'], Decimal("0.000"))
+
+    def test_boundary_day_movement_not_counted_in_next_period(self):
+        from sales.services import OverlappingReconciliationError
+        self._receipt("REC-W-03", "50.000", date(2026, 10, 7))
+        p1 = self._approve(self._calc(date(2026, 10, 1), date(2026, 10, 7), "50.000", opening="0.000"))
+        self.assertEqual(p1.period_receipts_kg, Decimal("50.000"))
+        with self.assertRaises(OverlappingReconciliationError):
+            self._calc(date(2026, 10, 7), date(2026, 10, 14), "50.000")
+        p2 = self._calc(date(2026, 10, 8), date(2026, 10, 14), "50.000")
+        self.assertEqual(p2.period_receipts_kg, Decimal("0.000"))
+        self.assertEqual(p2.discrepancy_kg, Decimal("0.000"))
+
+    def test_overlapping_period_cannot_be_saved_but_same_draft_can_be_recalculated(self):
+        from sales.services import OverlappingReconciliationError
+        from sales.models import ReconciliationStatus
+        draft = self._calc(date(2026, 10, 1), date(2026, 10, 7), None, opening="0.000")
+        self.assertEqual(draft.status, ReconciliationStatus.DRAFT)
+        with self.assertRaises(OverlappingReconciliationError):
+            self._calc(date(2026, 10, 5), date(2026, 10, 10), "0.000", opening="0.000")
+        updated = self._calc(date(2026, 10, 1), date(2026, 10, 7), "0.000", opening="0.000", instance=draft)
+        self.assertEqual(updated.pk, draft.pk)
+        self.assertEqual(updated.status, ReconciliationStatus.CALCULATED)
+        # Previews are not stored and stay unrestricted
+        self.assertIsNone(self._calc(date(2026, 10, 5), date(2026, 10, 10), "0.000", opening="0.000", save=False).pk)
+
+    def test_explicit_opening_must_match_previous_physical_count(self):
+        from sales.services import OpeningStockMismatchError
+        self._approve(self._period1())
+        with self.assertRaises(OpeningStockMismatchError):
+            self._calc(date(2026, 10, 8), date(2026, 10, 14), "15.000", opening="20.000")
+        ok = self._calc(date(2026, 10, 8), date(2026, 10, 14), "15.000", opening="15.000")
+        self.assertEqual(ok.opening_stock_kg, Decimal("15.000"))
+
+    def test_end_before_start_rejected(self):
+        with self.assertRaises(BusinessLogicError):
+            self._calc(date(2026, 10, 7), date(2026, 10, 1), "0.000", opening="0.000")
+
+    def test_approval_rejects_overlap_created_outside_service(self):
+        from sales.models import PhysicalInventoryReconciliation, ReconciliationStatus
+        from sales.services import OverlappingReconciliationError
+        recon = self._period1()
+        PhysicalInventoryReconciliation.objects.create(
+            document_number="STK-OOB", product=self.parent, period_start_date=date(2026, 10, 3),
+            period_end_date=date(2026, 10, 9), opening_stock_kg=Decimal("0.000"), is_opening_verified=True,
+            expected_closing_stock_kg=Decimal("20.000"), actual_physical_closing_stock_kg=Decimal("15.000"),
+            discrepancy_kg=Decimal("5.000"), status=ReconciliationStatus.APPROVED,
+        )
+        with self.assertRaises(OverlappingReconciliationError):
+            self._approve(recon)
+        recon.refresh_from_db()
+        self.assertEqual(recon.status, ReconciliationStatus.CALCULATED)
+
+    def test_approval_rejects_opening_stale_after_previous_period_approved(self):
+        from sales.services import OpeningStockMismatchError
+        p1 = self._period1()
+        # Calculated before period 1 was approved, with an opening that differs from its physical count
+        p2 = self._calc(date(2026, 10, 8), date(2026, 10, 14), "20.000", opening="20.000")
+        self._approve(p1)
+        with self.assertRaises(OpeningStockMismatchError):
+            self._approve(p2)
+
+    def test_closed_period_preserved_and_loss_recorded_once(self):
+        from sales.services import close_physical_reconciliation, ReconciliationLockedError, OverlappingReconciliationError
+        recon = self._approve(self._period1(), adjust=True)
+        recon = close_physical_reconciliation(recon, user=self.admin)
+        movements = StockMovement.objects.count()
+        with self.assertRaises(ReconciliationLockedError):
+            self._calc(date(2026, 10, 1), date(2026, 10, 7), "10.000", instance=recon)
+        with self.assertRaises(OverlappingReconciliationError):
+            self._calc(date(2026, 10, 1), date(2026, 10, 7), "15.000", opening="0.000")
+        self._approve(recon, adjust=True)
+        self.assertEqual(StockMovement.objects.count(), movements)
+        recon.refresh_from_db()
+        self.assertEqual(
+            (recon.opening_stock_kg, recon.period_receipts_kg, recon.period_issues_kg,
+             recon.actual_physical_closing_stock_kg, recon.discrepancy_kg),
+            (Decimal("0.000"), Decimal("200.000"), Decimal("180.000"), Decimal("15.000"), Decimal("5.000")),
+        )
+        self.assertEqual(self._loss()['confirmed_loss_kg'], Decimal("5.000"))
+        # Ledger reflects the 15 kg still physically in stock
+        self.assertEqual(get_parent_stock_balance(self.parent), Decimal("15.000"))
+
+    def test_report_shows_potential_loss_awaiting_review(self):
+        self._period1()
+        response = self.client.get(reverse('report_loss') + '?preset=all')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['physical_loss']['pending_potential_loss_kg'], Decimal("5.000"))
+        self.assertEqual(response.context['physical_loss']['confirmed_loss_kg'], Decimal("0.000"))
+        self.assertContains(response, "مغایرت‌های در انتظار بررسی و تایید")
+        self.assertContains(response, "کسری احتمالی – نیازمند تایید")
+
+    def test_end_to_end_invoices_do_not_change_flows_and_loss_applied_once(self):
+        from sales.models import ReconciliationStatus, PhysicalInventoryReconciliation
+        from sales.services import close_physical_reconciliation
+        self.parent.price_per_unit_rial = 1_000_000
+        self.parent.save()
+        self._receipt("REC-E2E-01", "200.000", date(2026, 10, 2))
+        issue = self._issue("ISS-E2E-01", "180.000", date(2026, 10, 5))
+        movements_before = StockMovement.objects.count()
+
+        # Invoice, cancel and re-invoice the same goods issue: financial documents only
+        invoice = generate_invoice_from_source_documents(source_type='SALE', document_ids=[issue.id])
+        cancel_invoice(invoice, cancellation_reason="اصلاح")
+        reissued = generate_invoice_from_source_documents(source_type='SALE', document_ids=[issue.id])
+        self.assertNotEqual(invoice.pk, reissued.pk)
+        self.assertEqual(StockMovement.objects.count(), movements_before)
+
+        recon = self._calc(date(2026, 10, 1), date(2026, 10, 7), "15.000", opening="0.000")
+        self.assertEqual(
+            (recon.period_receipts_kg, recon.period_issues_kg, recon.expected_closing_stock_kg, recon.discrepancy_kg),
+            (Decimal("200.000"), Decimal("180.000"), Decimal("20.000"), Decimal("5.000")),
+        )
+        stale_copy = PhysicalInventoryReconciliation.objects.get(pk=recon.pk)
+
+        self._approve(recon, adjust=True)
+        self._approve(stale_copy, adjust=True)          # stale in-memory CALCULATED instance
+        self._approve(recon, adjust=True)
+        close_physical_reconciliation(recon, user=self.admin)
+        close_physical_reconciliation(stale_copy, user=self.admin)
+        close_physical_reconciliation(recon, user=self.admin)
+
+        adjustments = StockMovement.objects.filter(movement_type=StockMovementType.ADJUSTMENT)
+        self.assertEqual(adjustments.count(), 1)
+        self.assertEqual(adjustments.get().net_weight_kg, Decimal("5.000"))
+        self.assertEqual(PhysicalInventoryReconciliation.objects.count(), 1)
+        self.assertEqual(stale_copy.status, ReconciliationStatus.CLOSED)
+        self.assertEqual(self._loss()['confirmed_loss_kg'], Decimal("5.000"))
+        # 15 kg still physically in stock; next period opens at 15, not 20 and not 15 +/- 5
+        self.assertEqual(get_parent_stock_balance(self.parent), Decimal("15.000"))
+        nxt = self._calc(date(2026, 10, 8), date(2026, 10, 14), "15.000")
+        self.assertEqual(nxt.opening_stock_kg, Decimal("15.000"))
+        self.assertEqual(nxt.discrepancy_kg, Decimal("0.000"))
+        self.assertEqual(self._loss()['confirmed_loss_kg'], Decimal("5.000"))
+
+    def test_stale_calculation_cannot_be_approved(self):
+        from sales.models import ReconciliationStatus
+        from sales.services import StaleReconciliationError
+        recon = self._period1()
+        self._receipt("REC-LATE-01", "10.000", date(2026, 10, 6))   # finalized after the calculation
+        with self.assertRaises(StaleReconciliationError):
+            self._approve(recon, adjust=True)
+        recon.refresh_from_db()
+        self.assertEqual(recon.status, ReconciliationStatus.CALCULATED)
+        self.assertFalse(StockMovement.objects.filter(movement_type=StockMovementType.ADJUSTMENT).exists())
+
+        recon = self._calc(date(2026, 10, 1), date(2026, 10, 7), "15.000", opening="0.000", instance=recon)
+        self.assertEqual(recon.period_receipts_kg, Decimal("210.000"))
+        self.assertEqual(recon.discrepancy_kg, Decimal("15.000"))
+        approved = self._approve(recon)
+        self.assertEqual(approved.status, ReconciliationStatus.APPROVED)
+
+    def test_movement_outside_period_or_other_product_does_not_make_calculation_stale(self):
+        from sales.models import ReconciliationStatus
+        other = Product.objects.create(name="لاشه دیگر", category=get_test_category("گوسفندی", "lamb"),
+                                       is_parent=True, unit="kg")
+        recon = self._period1()
+        self._receipt("REC-LATER-PERIOD", "30.000", date(2026, 10, 20))
+        finalize_goods_receipt(
+            document_number="REC-OTHER", supplier_name="تامین", product=other,
+            gross_weight_kg=Decimal("40.000"), tare_entries=[], document_date=date(2026, 10, 3),
+        )
+        self.assertEqual(self._approve(recon).status, ReconciliationStatus.APPROVED)
+
+    def test_period_and_product_filters_count_each_movement_once(self):
+        other = Product.objects.create(name="لاشه دیگر", category=get_test_category("گوسفندی", "lamb"),
+                                       is_parent=True, unit="kg")
+        self._receipt("REC-F-IN", "100.000", date(2026, 10, 3))
+        self._receipt("REC-F-BEFORE", "70.000", date(2026, 9, 30))     # before the period
+        self._receipt("REC-F-AFTER", "60.000", date(2026, 10, 8))      # after the period
+        finalize_goods_receipt(
+            document_number="REC-F-OTHER", supplier_name="تامین", product=other,
+            gross_weight_kg=Decimal("50.000"), tare_entries=[], document_date=date(2026, 10, 3),
+        )
+        self._issue("ISS-F-IN", "40.000", date(2026, 10, 4))
+        recon = self._calc(date(2026, 10, 1), date(2026, 10, 7), "60.000", opening="70.000")
+        receipt_movements = StockMovement.objects.filter(
+            product=self.parent, direction=StockMovementDirection.IN,
+            document_date__range=(date(2026, 10, 1), date(2026, 10, 7)),
+        )
+        self.assertEqual(receipt_movements.count(), 1)
+        self.assertEqual(recon.period_receipts_kg, Decimal("100.000"))
+        self.assertEqual(recon.period_issues_kg, Decimal("40.000"))
+        self.assertEqual(recon.expected_closing_stock_kg, Decimal("130.000"))
+        self.assertEqual(recon.discrepancy_kg, Decimal("70.000"))
+
+    def test_weights_normalized_and_negative_or_missing_rejected(self):
+        from sales.models import ReconciliationStatus
+        from sales.services import IncompleteReconciliationError, close_physical_reconciliation
+        with self.assertRaises(BusinessLogicError):
+            self._calc(date(2026, 10, 1), date(2026, 10, 7), "-1.000", opening="0.000")
+        with self.assertRaises(BusinessLogicError):
+            self._calc(date(2026, 10, 1), date(2026, 10, 7), "1.000", opening="-5.000")
+        from sales.services import calculate_physical_reconciliation
+        with self.assertRaises(BusinessLogicError):
+            calculate_physical_reconciliation(
+                product=self.parent, start_date=date(2026, 10, 1), end_date=date(2026, 10, 7),
+                opening_stock="0", is_opening_verified=True, actual_physical_closing_stock="abc",
+            )
+        recon = self._calc(date(2026, 10, 1), date(2026, 10, 7), "15.0004", opening="0.0001", save=False)
+        self.assertEqual(recon.actual_physical_closing_stock_kg, Decimal("15.000"))
+        self.assertEqual(recon.opening_stock_kg, Decimal("0.000"))
+
+        unweighed = self._calc(date(2026, 10, 1), date(2026, 10, 7), None, opening="0.000")
+        self.assertIsNone(unweighed.actual_physical_closing_stock_kg)
+        self.assertIsNone(unweighed.discrepancy_kg)
+        self.assertEqual(unweighed.status, ReconciliationStatus.DRAFT)
+        with self.assertRaises(IncompleteReconciliationError):
+            self._approve(unweighed)
+        with self.assertRaises(BusinessLogicError):
+            close_physical_reconciliation(unweighed, user=self.admin)
+        unweighed.refresh_from_db()
+        self.assertEqual(unweighed.status, ReconciliationStatus.DRAFT)
+
+
+class ReconciliationImmutabilityTestCase(TestCase):
+    """APPROVED / CLOSED reconciliations are immutable through every write path, judged by the stored status."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        self.cat = get_test_category("مرغ", "chicken")
+        self.parent = Product.objects.create(name="مرغ کامل قفل", category=self.cat, is_parent=True, unit="kg")
+        self.admin = User.objects.create_superuser(username="lock_admin", password="x", email="")
+
+    def _locked(self, status):
+        from sales.models import ReconciliationStatus
+        from sales.services import (
+            calculate_physical_reconciliation, approve_physical_reconciliation, close_physical_reconciliation,
+        )
+        recon = calculate_physical_reconciliation(
+            product=self.parent, start_date=date(2026, 10, 1), end_date=date(2026, 10, 7),
+            opening_stock=Decimal("100.000"), is_opening_verified=True,
+            actual_physical_closing_stock=Decimal("95.000"), save_record=True,
+        )
+        recon = approve_physical_reconciliation(recon, user=self.admin)
+        if status == ReconciliationStatus.CLOSED:
+            recon = close_physical_reconciliation(recon, user=self.admin)
+        return recon
+
+    def _snapshot(self, pk):
+        from sales.models import PhysicalInventoryReconciliation
+        return PhysicalInventoryReconciliation.objects.filter(pk=pk).values().get()
+
+    def _statuses(self):
+        from sales.models import ReconciliationStatus
+        return [ReconciliationStatus.APPROVED, ReconciliationStatus.CLOSED]
+
+    def test_save_cannot_change_any_field(self):
+        from sales.models import PhysicalInventoryReconciliation
+        changes = {
+            'period_receipts_kg': Decimal("1.000"), 'period_issues_kg': Decimal("1.000"),
+            'discrepancy_percentage': Decimal("1.00"), 'notes': "ویرایش", 'approved_by': None,
+            'is_opening_verified': False, 'discrepancy_kg': Decimal("0.000"),
+            'actual_physical_closing_stock_kg': Decimal("100.000"), 'document_number': "STK-X",
+        }
+        for status in self._statuses():
+            for field, value in changes.items():
+                with self.subTest(status=status, field=field):
+                    recon = self._locked(status)
+                    before = self._snapshot(recon.pk)
+                    obj = PhysicalInventoryReconciliation.objects.get(pk=recon.pk)
+                    setattr(obj, field, value)
+                    with self.assertRaises(ValidationError):
+                        obj.save()
+                    self.assertEqual(self._snapshot(recon.pk), before)
+                    # Clean up through the unguarded base manager for the next subtest only
+                    PhysicalInventoryReconciliation._base_manager.filter(pk=recon.pk)._raw_delete(using='default')
+
+    def test_stale_in_memory_status_cannot_override_stored_status(self):
+        from sales.models import PhysicalInventoryReconciliation, ReconciliationStatus
+        for status in self._statuses():
+            with self.subTest(status=status):
+                recon = self._locked(status)
+                before = self._snapshot(recon.pk)
+                stale = PhysicalInventoryReconciliation.objects.get(pk=recon.pk)
+                stale.status = ReconciliationStatus.CALCULATED
+                with self.assertRaises(ValidationError):
+                    stale.save()
+                stale.notes = "تغییر"
+                with self.assertRaises(ValidationError):
+                    stale.save()
+                self.assertEqual(self._snapshot(recon.pk), before)
+                PhysicalInventoryReconciliation._base_manager.filter(pk=recon.pk)._raw_delete(using='default')
+
+    def test_only_approved_to_closed_transition_is_allowed(self):
+        from sales.models import PhysicalInventoryReconciliation, ReconciliationStatus
+        recon = self._locked(ReconciliationStatus.APPROVED)
+        obj = PhysicalInventoryReconciliation.objects.get(pk=recon.pk)
+        obj.status = ReconciliationStatus.CLOSED
+        obj.save()
+        obj.status = ReconciliationStatus.APPROVED
+        with self.assertRaises(ValidationError):
+            obj.save()
+        self.assertEqual(self._snapshot(recon.pk)['status'], ReconciliationStatus.CLOSED)
+
+    def test_queryset_update_and_bulk_update_refused(self):
+        from sales.models import PhysicalInventoryReconciliation, ReconciliationStatus
+        from sales.services import calculate_physical_reconciliation
+        for status in self._statuses():
+            with self.subTest(status=status):
+                recon = self._locked(status)
+                unlocked = calculate_physical_reconciliation(
+                    product=self.parent, start_date=date(2026, 10, 8), end_date=date(2026, 10, 14),
+                    actual_physical_closing_stock=Decimal("90.000"), save_record=True,
+                )
+                before_locked, before_unlocked = self._snapshot(recon.pk), self._snapshot(unlocked.pk)
+                qs = PhysicalInventoryReconciliation.objects
+                with self.assertRaises(ValidationError):
+                    qs.filter(pk=recon.pk).update(discrepancy_kg=Decimal("0.000"))
+                with self.assertRaises(ValidationError):    # mixed locked + unlocked rows
+                    qs.filter(pk__in=[recon.pk, unlocked.pk]).update(notes="x")
+                with self.assertRaises(ValidationError):    # the close transition is not allowed in bulk
+                    qs.filter(pk=recon.pk).update(status=ReconciliationStatus.CLOSED)
+                obj = qs.get(pk=recon.pk)
+                obj.notes = "bulk"
+                with self.assertRaises(ValidationError):
+                    qs.bulk_update([obj], ['notes'])
+                self.assertEqual(self._snapshot(recon.pk), before_locked)
+                self.assertEqual(self._snapshot(unlocked.pk), before_unlocked)
+                # An unlocked record alone can still be updated
+                self.assertEqual(qs.filter(pk=unlocked.pk).update(notes="draft note"), 1)
+                PhysicalInventoryReconciliation._base_manager.all()._raw_delete(using='default')
+
+    def test_delete_refused_for_model_and_queryset(self):
+        from sales.models import PhysicalInventoryReconciliation
+        for status in self._statuses():
+            with self.subTest(status=status):
+                recon = self._locked(status)
+                with self.assertRaises(ValidationError):
+                    recon.delete()
+                with self.assertRaises(ValidationError):
+                    PhysicalInventoryReconciliation.objects.filter(pk=recon.pk).delete()
+                with self.assertRaises(ValidationError):
+                    PhysicalInventoryReconciliation.objects.all().delete()
+                self.assertTrue(PhysicalInventoryReconciliation.objects.filter(pk=recon.pk).exists())
+                PhysicalInventoryReconciliation._base_manager.filter(pk=recon.pk)._raw_delete(using='default')
+
+    def test_admin_cannot_edit_or_delete_locked_record(self):
+        from sales.models import PhysicalInventoryReconciliation
+        self.client.force_login(self.admin)
+        for status in self._statuses():
+            with self.subTest(status=status):
+                recon = self._locked(status)
+                before = self._snapshot(recon.pk)
+                change_url = reverse('admin:sales_physicalinventoryreconciliation_change', args=[recon.pk])
+                page = self.client.get(change_url)
+                self.assertEqual(page.status_code, 200)
+                self.assertNotContains(page, 'name="actual_physical_closing_stock_kg"')
+                self.client.post(change_url, {
+                    'actual_physical_closing_stock_kg': '1.000', 'discrepancy_kg': '0.000', 'notes': 'admin edit',
+                    'status': 'DRAFT', '_save': 'Save',
+                })
+                self.assertEqual(self._snapshot(recon.pk), before)
+                delete_url = reverse('admin:sales_physicalinventoryreconciliation_delete', args=[recon.pk])
+                self.assertEqual(self.client.post(delete_url, {'post': 'yes'}).status_code, 403)
+                # The bulk "delete selected" action is refused by the per-object delete permission
+                changelist = reverse('admin:sales_physicalinventoryreconciliation_changelist')
+                self.client.post(changelist, {
+                    'action': 'delete_selected', '_selected_action': [recon.pk], 'post': 'yes',
+                })
+                self.assertTrue(PhysicalInventoryReconciliation.objects.filter(pk=recon.pk).exists())
+                self.assertEqual(self._snapshot(recon.pk), before)
+                PhysicalInventoryReconciliation._base_manager.filter(pk=recon.pk)._raw_delete(using='default')
+
+    def test_recalculating_stale_instance_of_locked_record_refused(self):
+        from sales.models import PhysicalInventoryReconciliation, ReconciliationStatus
+        from sales.services import calculate_physical_reconciliation, ReconciliationLockedError
+        for status in self._statuses():
+            with self.subTest(status=status):
+                recon = self._locked(status)
+                stale = PhysicalInventoryReconciliation.objects.get(pk=recon.pk)
+                stale.status = ReconciliationStatus.CALCULATED
+                with self.assertRaises(ReconciliationLockedError):
+                    calculate_physical_reconciliation(
+                        product=self.parent, start_date=date(2026, 10, 1), end_date=date(2026, 10, 7),
+                        actual_physical_closing_stock=Decimal("10.000"), save_record=True,
+                        reconciliation_instance=stale,
+                    )
+                self.assertEqual(self._snapshot(recon.pk)['actual_physical_closing_stock_kg'], Decimal("95.000"))
+                PhysicalInventoryReconciliation._base_manager.filter(pk=recon.pk)._raw_delete(using='default')
+
+
+class MoneyFormattingAndRialConsistencyTestCase(TestCase):
+    """One shared Rial formatter; the same stored amount reads identically everywhere and is never rescaled."""
+
+    def setUp(self):
+        self.cat = get_test_category("گوساله آزمون ریال", "veal-rial")
+        self.parent = Product.objects.create(name="لاشه گوساله", category=self.cat, is_parent=True, unit="kg")
+        self.cut = Product.objects.create(name="ران گوساله", category=self.cat, parent=self.parent, unit="kg",
+                                          price_per_unit_rial=12_500_000)
+
+    def test_format_thousands_and_rial(self):
+        from sales.date_utils import format_thousands, format_rial
+        cases = {
+            0: "۰", 950: "۹۵۰", 12500000: "۱۲,۵۰۰,۰۰۰", -1500: "-۱,۵۰۰",
+            Decimal("1234.50"): "۱,۲۳۴.۵۰", Decimal("-0.125"): "-۰.۱۲۵",
+            "12,500,000": "۱۲,۵۰۰,۰۰۰", "۱۲,۵۰۰,۰۰۰": "۱۲,۵۰۰,۰۰۰", "۱۲٬۵۰۰٬۰۰۰": "۱۲,۵۰۰,۰۰۰",
+            None: "۰", "abc": "abc",
+        }
+        for value, expected in cases.items():
+            with self.subTest(value=value):
+                self.assertEqual(format_thousands(value), expected)
+        self.assertEqual(format_rial(12500000), "۱۲,۵۰۰,۰۰۰ ریال")
+        # Formatting an already formatted value never doubles separators
+        self.assertEqual(format_thousands(format_thousands(12500000)), "۱۲,۵۰۰,۰۰۰")
+
+    def test_template_filters(self):
+        from sales.templatetags.jalali_tags import rial_filter, thousands_filter, format_weight_kg_filter, toman_display_filter
+        self.assertEqual(rial_filter(12500000), "۱۲,۵۰۰,۰۰۰ ریال")
+        self.assertEqual(thousands_filter(12500000), "۱۲,۵۰۰,۰۰۰")
+        self.assertEqual(format_weight_kg_filter(Decimal("15.5")), "۱۵.۵۰۰")
+        self.assertEqual(format_weight_kg_filter(Decimal("0.125")), "۰.۱۲۵")
+        self.assertEqual(toman_display_filter(12500000), "۱,۲۵۰,۰۰۰")   # approximate input hint only
+
+    def test_model_display_properties_are_rial_without_rescaling(self):
+        self.assertEqual(self.cut.price_display, "۱۲,۵۰۰,۰۰۰ ریال")
+        inv = finalize_invoice(
+            document_number="INV-RIAL-01", goods_owner_name="واکا", buyer_name="خریدار",
+            items_data=[{'product': self.cut, 'quantity': 1, 'net_weight_kg': Decimal("1.000"), 'unit_price_rial': 12_500_000}],
+        )
+        item = inv.items.get()
+        self.assertEqual(inv.total_amount_display, "۱۲,۵۰۰,۰۰۰ ریال")
+        self.assertEqual(item.unit_price_display, "۱۲,۵۰۰,۰۰۰ ریال")
+        self.assertEqual(item.total_price_display, "۱۲,۵۰۰,۰۰۰ ریال")
+        self.assertEqual((inv.total_amount_rial, item.unit_price_rial, item.total_price_rial),
+                         (12_500_000, 12_500_000, 12_500_000))
+
+    def test_same_amount_reads_identically_on_every_page_and_is_not_mutated(self):
+        finalize_goods_receipt(
+            document_number="REC-RIAL", supplier_name="تامین", product=self.parent,
+            gross_weight_kg=Decimal("50.000"), tare_entries=[],
+        )
+        issue = finalize_goods_issue(
+            document_number="ISS-RIAL", goods_owner_name="واکا", recipient_name="مشتری",
+            items_data=[{'product': self.cut, 'gross_weight_kg': Decimal("1.000"), 'tare_entries': [],
+                         'unit_price_rial': 12_500_000}],
+        )
+        inv = generate_invoice_from_source_documents(source_type='SALE', document_ids=[issue.id])
+        item = inv.items.get()
+        stored_before = (inv.total_amount_rial, item.unit_price_rial, item.total_price_rial,
+                         self.cut.price_per_unit_rial)
+        pages = {
+            'invoice_detail': reverse('invoice_detail', args=[inv.pk]),
+            'invoice_list': reverse('invoice_list'),
+            'issue_detail': reverse('issue_detail', args=[issue.pk]),
+            'issue_list': reverse('issue_list'),
+            'report_sales': reverse('report_sales'),
+            'reports_hub': reverse('reports_hub'),
+        }
+        import re
+        for name, url in pages.items():
+            with self.subTest(page=name):
+                res = self.client.get(url)
+                self.assertEqual(res.status_code, 200)
+                # Visible markup only: base.html's script holds the Toman *input hint* helper
+                markup = re.sub(r'<script\b.*?</script>', '', res.content.decode('utf-8'), flags=re.S)
+                self.assertIn("۱۲,۵۰۰,۰۰۰", markup)
+                self.assertNotIn("تومان", markup)
+                self.assertNotIn("1,250,000", markup)
+                self.assertNotIn("۱,۲۵۰,۰۰۰", markup)
+        detail = self.client.get(pages['invoice_detail'])
+        self.assertContains(detail, "قیمت واحد (ریال)")
+        self.assertContains(detail, "مبلغ کل (ریال)")
+        self.assertContains(detail, "۱۲,۵۰۰,۰۰۰ ریال")       # grand total with unit
+        inv.refresh_from_db()
+        item.refresh_from_db()
+        self.cut.refresh_from_db()
+        self.assertEqual((inv.total_amount_rial, item.unit_price_rial, item.total_price_rial,
+                          self.cut.price_per_unit_rial), stored_before)
+
+    def test_sales_report_counts_and_csv_match_rows(self):
+        import csv as csv_module
+        import io
+        other_cat = get_test_category("مرغ آزمون ریال", "chicken-rial")
+        chicken = Product.objects.create(name="فیله مرغ", category=other_cat, unit="kg", price_per_unit_rial=2_000_000)
+        finalize_invoice(document_number="INV-R-1", goods_owner_name="واکا", buyer_name="الف",
+                         items_data=[{'product': self.cut, 'quantity': 1, 'net_weight_kg': Decimal("2.000"),
+                                      'unit_price_rial': 12_500_000}])
+        finalize_invoice(document_number="INV-R-2", goods_owner_name="واکا", buyer_name="ب",
+                         items_data=[{'product': chicken, 'quantity': 1, 'net_weight_kg': Decimal("3.000"),
+                                      'unit_price_rial': 2_000_000}])
+        params = '?category=veal-rial'
+        res = self.client.get(reverse('report_sales') + params)
+        rows = list(res.context['product_stats'])
+        self.assertEqual(res.context['invoice_count'], 1)
+        self.assertEqual(res.context['total_revenue_rial'], sum(r['total_revenue'] for r in rows))
+        self.assertEqual(res.context['total_revenue_rial'], 25_000_000)
+        raw = self.client.get(reverse('export_sales_csv') + params).content.decode('utf-8')
+        self.assertTrue(raw.startswith('﻿'))
+        self.assertFalse(raw[1:].startswith('﻿'))
+        lines = list(csv_module.reader(io.StringIO(raw[1:])))
+        self.assertEqual(sum(int(line[10]) for line in lines[1:]), 25_000_000)
+
+
+
+class InvoicePriceEntryTestCase(TestCase):
+    """Price entry from the real forms through views and services to the stored invoice-line snapshot."""
+
+    def setUp(self):
+        self.cat = get_test_category("گوساله آزمون قیمت", "veal-price")
+        self.parent = Product.objects.create(name="لاشه گوساله قیمت", category=self.cat, is_parent=True, unit="kg")
+        self.cut = Product.objects.create(name="ران گوساله قیمت", category=self.cat, parent=self.parent, unit="kg",
+                                          price_per_unit_rial=12_500_000)
+        finalize_goods_receipt(
+            document_number="REC-STOCK", supplier_name="کشتارگاه", product=self.parent,
+            gross_weight_kg=Decimal("500.000"), tare_entries=[],
+        )
+
+    def _issue(self, product, kg="10.000", price=None, doc="ISS-P-1"):
+        return finalize_goods_issue(
+            document_number=doc, goods_owner_name="واکا", recipient_name="مشتری",
+            items_data=[{'product': product, 'gross_weight_kg': Decimal(kg), 'tare_entries': [], 'unit_price_rial': price}],
+        )
+
+    def _post_sale(self, issue, prices=None):
+        data = {'source_type': 'SALE', 'selected_issues': [str(issue.id)], 'goods_owner_name': 'واکا'}
+        data.update(prices or {})
+        return self.client.post(reverse('invoice_from_source'), data)
+
+    def _receipt_payload(self, price):
+        import json
+        # Exactly the shape receipt_form.html builds in committedReceiptItems
+        return {
+            'supplier_name': 'کشتارگاه مرکزی',
+            'items_json': json.dumps([{
+                'product_id': self.parent.id, 'product_name': self.parent.name, 'gross_weight_kg': 40.0,
+                'total_tare_weight_kg': 0.0, 'net_weight_kg': 40.0, 'unit_price_rial': price,
+                'package_count': 2, 'condition_notes': '', 'remarks': '', 'tare_entries': [],
+            }]),
+        }
+
+    def test_receipt_form_submits_backend_key_and_price_is_persisted(self):
+        from sales.services import calculate_line_total_rial
+        page = self.client.get(reverse('receipt_create')).content.decode('utf-8')
+        self.assertIn("unit_price_rial: unitPrice", page)
+        self.assertNotIn("unit_price: unitPrice", page)
+
+        res = self.client.post(reverse('receipt_create'), self._receipt_payload(9_850_000))
+        self.assertEqual(res.status_code, 302)
+        receipt = GoodsReceipt.objects.get(supplier_name='کشتارگاه مرکزی')
+        item = receipt.items.get()
+        self.assertEqual(item.unit_price_rial, 9_850_000)                     # stored in Rial, not rescaled
+        self.assertEqual(item.line_total_rial, calculate_line_total_rial(item.net_weight_kg, 9_850_000))
+
+        # The saved purchase price is the editable default on the purchase-invoice form
+        page = self.client.get(reverse('invoice_from_source') + '?tab=purchase').content.decode('utf-8')
+        self.assertIn(f'name="price_override_receipt_item_{item.id}" value="9850000"', page)
+        self.assertIn("قیمت خرید ثبت‌شده در ردیف رسید", page)
+
+        res = self.client.post(reverse('invoice_from_source'), {
+            'source_type': 'PURCHASE', 'selected_receipts': [str(receipt.id)], 'goods_owner_name': 'واکا',
+            f'price_override_receipt_item_{item.id}': '9850000',
+        })
+        self.assertEqual(res.status_code, 302)
+        inv_item = InvoiceItem.objects.get(source_receipt_item=item)
+        self.assertEqual(inv_item.unit_price_rial, 9_850_000)
+
+    def test_receipt_rejects_malformed_or_negative_price(self):
+        for bad in ["12a", -5, 10.5, "-1"]:
+            with self.subTest(price=bad):
+                res = self.client.post(reverse('receipt_create'), self._receipt_payload(bad))
+                self.assertEqual(res.status_code, 200)
+                self.assertFalse(GoodsReceipt.objects.filter(supplier_name='کشتارگاه مرکزی').exists())
+        # Optional on the receipt itself
+        res = self.client.post(reverse('receipt_create'), self._receipt_payload(None))
+        self.assertEqual(res.status_code, 302)
+        self.assertIsNone(GoodsReceipt.objects.get(supplier_name='کشتارگاه مرکزی').items.get().unit_price_rial)
+
+    def test_sale_without_any_default_requires_and_accepts_manual_price(self):
+        from sales.services import calculate_line_total_rial
+        issue = self._issue(self.parent)                    # parent has no catalogue price; issue has none
+        item = issue.items.get()
+        key = f"price_override_issue_item_{item.id}"
+        page = self.client.get(reverse('invoice_from_source')).content.decode('utf-8')
+        self.assertIn(f'name="{key}" value=""', page)
+        self.assertIn("قیمت فروش ثبت نشده", page)
+
+        res = self._post_sale(issue)                        # nothing entered: backend refuses
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(Invoice.objects.exists())
+        self.assertContains(res, "تعیین نشده است")
+        self.assertContains(res, f'name="{key}" value=""')
+
+        res = self._post_sale(issue, {key: "7000000"})
+        self.assertEqual(res.status_code, 302)
+        line = InvoiceItem.objects.get(source_issue_item=item)
+        self.assertEqual(line.unit_price_rial, 7_000_000)
+        self.assertEqual(line.total_price_rial, calculate_line_total_rial(item.net_weight_kg, 7_000_000))
+        self.assertEqual(line.invoice.total_amount_rial, line.total_price_rial)
+
+    def test_catalogue_default_is_shown_and_override_is_saved(self):
+        issue = self._issue(self.cut)
+        item = issue.items.get()
+        key = f"price_override_issue_item_{item.id}"
+        page = self.client.get(reverse('invoice_from_source')).content.decode('utf-8')
+        self.assertIn(f'name="{key}" value="12500000"', page)
+        self.assertIn("پیش‌فرض از: قیمت فروش کالا (کاتالوگ)", page)
+
+        res = self._post_sale(issue, {key: "13000000"})
+        self.assertEqual(res.status_code, 302)
+        line = InvoiceItem.objects.get(source_issue_item=item)
+        self.assertEqual(line.unit_price_rial, 13_000_000)
+        self.cut.refresh_from_db()
+        self.assertEqual(self.cut.price_per_unit_rial, 12_500_000)     # catalogue untouched
+        detail = self.client.get(reverse('invoice_detail', args=[line.invoice.pk]))
+        self.assertContains(detail, "۱۳,۰۰۰,۰۰۰")
+
+    def test_invalid_override_rejected_and_entered_values_preserved(self):
+        issue = self._issue(self.cut)
+        item = issue.items.get()
+        key = f"price_override_issue_item_{item.id}"
+        for bad in ["abc", "-100", "0", "12.5"]:
+            with self.subTest(price=bad):
+                res = self._post_sale(issue, {key: bad})
+                self.assertEqual(res.status_code, 200)
+                self.assertFalse(Invoice.objects.exists())
+                self.assertContains(res, f'name="{key}" value="{bad}"')
+                self.assertContains(res, f'id="iss-chk-{issue.id}" checked')
+
+    def test_line_and_invoice_totals_use_entered_prices(self):
+        from sales.services import calculate_line_total_rial
+        issue = finalize_goods_issue(
+            document_number="ISS-TOT", goods_owner_name="واکا", recipient_name="مشتری",
+            items_data=[
+                {'product': self.cut, 'gross_weight_kg': Decimal("1.333"), 'tare_entries': []},
+                {'product': self.parent, 'gross_weight_kg': Decimal("2.501"), 'tare_entries': []},
+            ],
+        )
+        items = list(issue.items.order_by('id'))
+        prices = {f"price_override_issue_item_{items[0].id}": "1000003",
+                  f"price_override_issue_item_{items[1].id}": "777777"}
+        self.assertEqual(self._post_sale(issue, prices).status_code, 302)
+        inv = Invoice.objects.get()
+        expected = [calculate_line_total_rial(items[0].net_weight_kg, 1_000_003),
+                    calculate_line_total_rial(items[1].net_weight_kg, 777_777)]
+        self.assertEqual(sorted(inv.items.values_list('total_price_rial', flat=True)), sorted(expected))
+        self.assertEqual(inv.total_amount_rial, sum(expected))
+
+    def test_historical_invoice_prices_survive_catalogue_and_later_receipt_prices(self):
+        issue = self._issue(self.cut)
+        self.assertEqual(self._post_sale(issue).status_code, 302)     # catalogue default 12,500,000
+        line = InvoiceItem.objects.get()
+        snapshot = (line.unit_price_rial, line.total_price_rial, line.invoice.total_amount_rial)
+
+        self.cut.price_per_unit_rial = 99_000_000
+        self.cut.save()
+        finalize_goods_receipt(
+            document_number="REC-LATER", supplier_name="کشتارگاه", supplier_document_ref="",
+            items_data=[{'product': self.cut, 'gross_weight_kg': Decimal("5.000"), 'tare_entries': [],
+                         'unit_price_rial': 55_000_000}],
+        )
+        line.refresh_from_db()
+        line.invoice.refresh_from_db()
+        self.assertEqual((line.unit_price_rial, line.total_price_rial, line.invoice.total_amount_rial), snapshot)
+        detail = self.client.get(reverse('invoice_detail', args=[line.invoice.pk]))
+        self.assertContains(detail, "۱۲,۵۰۰,۰۰۰")
+        self.assertNotContains(detail, "۹۹,۰۰۰,۰۰۰")
+
+    def test_purchase_cost_is_never_a_sale_default(self):
+        from sales.services import resolve_sale_price_default
+        finalize_goods_receipt(
+            document_number="REC-COST", supplier_name="کشتارگاه", supplier_document_ref="",
+            items_data=[{'product': self.parent, 'gross_weight_kg': Decimal("20.000"), 'tare_entries': [],
+                         'unit_price_rial': 9_000_000}],
+        )
+        issue = self._issue(self.parent, doc="ISS-COST")
+        item = issue.items.get()
+        page = self.client.get(reverse('invoice_from_source')).content.decode('utf-8')
+        self.assertIn(f'name="price_override_issue_item_{item.id}" value=""', page)
+        self.assertEqual(resolve_sale_price_default(issue, item), (None, None))
+        with self.assertRaises(BusinessLogicError):
+            generate_invoice_from_source_documents(source_type='SALE', document_ids=[issue.id])
+
+    def test_unprefixed_ids_do_not_cross_apply_between_models(self):
+        receipt = finalize_goods_receipt(
+            document_number="REC-NOPRICE", supplier_name="کشتارگاه", supplier_document_ref="",
+            items_data=[{'product': self.parent, 'gross_weight_kg': Decimal("3.000"), 'tare_entries': []}],
+        )
+        item = receipt.items.get()
+        # Bare ids (the old collision path) are ignored by the service ...
+        for key in (str(receipt.id), str(item.id)):
+            with self.subTest(key=key):
+                with self.assertRaises(BusinessLogicError):
+                    generate_invoice_from_source_documents(
+                        source_type='PURCHASE', document_ids=[receipt.id], prices_override={key: 5_000_000},
+                    )
+        # ... and old-style form keys are ignored by the view
+        res = self.client.post(reverse('invoice_from_source'), {
+            'source_type': 'PURCHASE', 'selected_receipts': [str(receipt.id)], 'goods_owner_name': 'واکا',
+            f'unit_price_rial_{item.id}': '5000000', f'unit_price_rial_{receipt.id}': '5000000',
+        })
+        self.assertEqual(res.status_code, 200)
+        self.assertFalse(Invoice.objects.filter(invoice_type='PURCHASE').exists())
+        # A receipt-item override applies to that line only
+        inv = generate_invoice_from_source_documents(
+            source_type='PURCHASE', document_ids=[receipt.id],
+            prices_override={f"receipt_item_{item.id}": 5_000_000, f"issue_item_{item.id}": 1},
+        )
+        self.assertEqual(inv.items.get().unit_price_rial, 5_000_000)
+
+
+
+class A5PrintMarkupRegressionTestCase(TestCase):
+    """
+    Regression guard for the A5 print layout (the visual fit itself was verified by rendering real
+    A5 PDFs with headless Chrome; these assertions only stop the fix from silently regressing).
+    """
+
+    def setUp(self):
+        self.cat = get_test_category("گوساله آزمون چاپ", "veal-a5")
+        self.parent = Product.objects.create(name="لاشه گوساله چاپ", category=self.cat, is_parent=True, unit="kg")
+        self.cut = Product.objects.create(name="ران گوساله بدون استخوان مخصوص استیک و کباب برگ", category=self.cat,
+                                          parent=self.parent, unit="kg")
+        self.receipt = finalize_goods_receipt(
+            document_number="REC-A5", supplier_name="کشتارگاه", supplier_document_ref="",
+            items_data=[{'product': self.parent, 'gross_weight_kg': Decimal("300.000"), 'tare_entries': [],
+                         'unit_price_rial': 9_850_000}],
+        )
+        self.issue = finalize_goods_issue(
+            document_number="ISS-A5", goods_owner_name="واکا", recipient_name="مشتری",
+            items_data=[{'product': self.cut, 'gross_weight_kg': Decimal("125.375"), 'tare_entries': [],
+                         'unit_price_rial': 12_500_000, 'remarks': "تحویل فوری"}],
+        )
+        self.invoice = generate_invoice_from_source_documents(source_type='SALE', document_ids=[self.issue.id])
+
+    def _print_css(self, html):
+        import re
+        styles = "".join(re.findall(r'<style>(.*?)</style>', html, flags=re.S))
+        start = styles.index('@media print')
+        return styles[start:]
+
+    def test_invoice_print_layout_keeps_unit_price_and_totals(self):
+        html = self.client.get(reverse('invoice_detail', args=[self.invoice.pk])).content.decode('utf-8')
+        css = self._print_css(html)
+        self.assertIn('size: A5 portrait', html)
+        self.assertIn('table-layout: fixed', css)
+        self.assertIn('.table-responsive { overflow: visible !important;', css)
+        self.assertIn('th.col-price', css)
+        self.assertIn('th.col-total', css)
+        self.assertIn('.invoice-total-box', css)
+        self.assertNotIn('overflow: hidden', css)
+        for cls in ('doc-header', 'doc-meta', 'doc-parties'):
+            self.assertIn(f'class="{cls}', html)
+        self.assertIn('قیمت واحد (ریال)', html)
+        self.assertIn('۱۲,۵۰۰,۰۰۰', html)                                 # unit price
+        self.assertIn(f'{self.invoice.items.get().total_price_rial:,}'.translate(
+            str.maketrans('0123456789', '۰۱۲۳۴۵۶۷۸۹')), html)             # line total
+        self.assertIn('id="invoice-grand-total"', html)
+
+    def test_issue_and_receipt_print_layout(self):
+        issue_html = self.client.get(reverse('issue_detail', args=[self.issue.pk])).content.decode('utf-8')
+        css = self._print_css(issue_html)
+        self.assertIn('size: A5 portrait', issue_html)
+        self.assertIn('table.doc-items-table { width: 100% !important; table-layout: fixed;', css)
+        self.assertNotIn('overflow: hidden', css)
+        # Columns dropped from the A5 copy keep their content under the product name
+        self.assertIn('class="print-line-extra">' + self.cat.name + ' — تحویل فوری', issue_html)
+        self.assertIn('۱۲,۵۰۰,۰۰۰', issue_html)
+
+        receipt_html = self.client.get(reverse('receipt_detail', args=[self.receipt.pk])).content.decode('utf-8')
+        css = self._print_css(receipt_html)
+        self.assertIn('size: A5 portrait', receipt_html)
+        self.assertIn('table.doc-items-table { table-layout: fixed; }', css)
+        self.assertNotIn('overflow: hidden', css)
+        self.assertIn('قیمت واحد خرید (ریال)', receipt_html)
+        self.assertIn('۹,۸۵۰,۰۰۰', receipt_html)
+
+
+
+class ReconciliationWorkflowViewsTestCase(TestCase):
+    """UI workflow for physical inventory reconciliation: list, create, count, approve, close."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        self.cat = get_test_category("مرغ آزمون انبارگردانی", "chicken-recon-ui")
+        self.parent = Product.objects.create(name="مرغ کامل انبارگردانی", category=self.cat, is_parent=True, unit="kg")
+        self.manager = User.objects.create_user(username="recon_manager", password="x", is_staff=True)
+        self.clerk = User.objects.create_user(username="recon_clerk_ui", password="x")
+        finalize_goods_receipt(
+            document_number="REC-UI-01", supplier_name="کشتارگاه", product=self.parent,
+            gross_weight_kg=Decimal("200.000"), tare_entries=[], document_date=date(2026, 10, 2),
+        )
+        finalize_goods_issue(
+            document_number="ISS-UI-01", product=self.parent, gross_weight_kg=Decimal("180.000"), tare_entries=[],
+            goods_owner_name="واکا", recipient_name="مشتری", document_date=date(2026, 10, 5),
+        )
+
+    # -- helpers ---------------------------------------------------------------------------
+    def _login(self, user=None):
+        self.client.force_login(user or self.manager)
+
+    def _create(self, start="2026-10-01", end="2026-10-07", actual="15", opening="0", verified=True, product=None, **extra):
+        data = {'product': str((product or self.parent).id), 'start_date': start, 'end_date': end,
+                'actual_physical_closing_stock': actual, 'opening_stock': opening, 'notes': ''}
+        if verified:
+            data['is_opening_verified'] = 'on'
+        data.update(extra)
+        return self.client.post(reverse('reconciliation_create'), data)
+
+    def _recon(self):
+        from sales.models import PhysicalInventoryReconciliation
+        return PhysicalInventoryReconciliation.objects.get()
+
+    def _adjustments(self):
+        return StockMovement.objects.filter(movement_type=StockMovementType.ADJUSTMENT)
+
+    # -- access ----------------------------------------------------------------------------
+    def test_authorized_user_can_open_list_and_navigation_link_exists(self):
+        self._login()
+        res = self.client.get(reverse('reconciliation_list'))
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, 'انبارگردانی')
+        self.assertContains(res, f'href="{reverse("reconciliation_list")}"')
+
+    def test_anonymous_and_unauthorized_users_cannot_use_any_page_or_action(self):
+        self._login()
+        self._create()
+        recon = self._recon()
+        self.client.logout()
+        urls = {
+            'list': ('get', reverse('reconciliation_list')),
+            'create': ('post', reverse('reconciliation_create')),
+            'detail': ('get', reverse('reconciliation_detail', args=[recon.pk])),
+            'count': ('post', reverse('reconciliation_count', args=[recon.pk])),
+            'approve': ('post', reverse('reconciliation_approve', args=[recon.pk])),
+            'close': ('post', reverse('reconciliation_close', args=[recon.pk])),
+        }
+        for name, (method, url) in urls.items():
+            with self.subTest(user='anonymous', page=name):
+                res = getattr(self.client, method)(url, {'actual_physical_closing_stock': '1'})
+                self.assertEqual(res.status_code, 302)
+                self.assertTrue(res['Location'].startswith(reverse('login') + '?next='))
+                self.assertNotIn('/admin/', res['Location'])
+        self._login(self.clerk)
+        for name, (method, url) in urls.items():
+            with self.subTest(user='clerk', page=name):
+                res = getattr(self.client, method)(url, {'actual_physical_closing_stock': '1'})
+                self.assertEqual(res.status_code, 403)
+        recon.refresh_from_db()
+        self.assertEqual(recon.actual_physical_closing_stock_kg, Decimal("15.000"))
+        self.assertEqual(recon.status, 'CALCULATED')
+
+    def test_get_requests_never_change_state(self):
+        self._login()
+        self._create()
+        recon = self._recon()
+        for name in ('reconciliation_count', 'reconciliation_approve', 'reconciliation_close'):
+            with self.subTest(url=name):
+                self.assertEqual(self.client.get(reverse(name, args=[recon.pk])).status_code, 405)
+        recon.refresh_from_db()
+        self.assertEqual(recon.status, 'CALCULATED')
+        self.assertFalse(self._adjustments().exists())
+
+    def test_missing_record_returns_404(self):
+        self._login()
+        self.assertEqual(self.client.get(reverse('reconciliation_detail', args=[99999])).status_code, 404)
+        self.assertEqual(self.client.post(reverse('reconciliation_approve', args=[99999])).status_code, 404)
+
+    # -- create ----------------------------------------------------------------------------
+    def test_create_uses_calculation_service_and_example_figures(self):
+        from unittest import mock
+        from sales import services
+        self._login()
+        with mock.patch('sales.views.calculate_physical_reconciliation',
+                        wraps=services.calculate_physical_reconciliation) as calc:
+            res = self._create()
+        self.assertEqual(calc.call_count, 1)
+        self.assertTrue(calc.call_args.kwargs['save_record'])
+        recon = self._recon()
+        self.assertRedirects(res, reverse('reconciliation_detail', args=[recon.pk]))
+        self.assertEqual(
+            (recon.opening_stock_kg, recon.period_receipts_kg, recon.period_issues_kg,
+             recon.expected_closing_stock_kg, recon.actual_physical_closing_stock_kg, recon.discrepancy_kg),
+            (Decimal("0.000"), Decimal("200.000"), Decimal("180.000"), Decimal("20.000"), Decimal("15.000"), Decimal("5.000")),
+        )
+        self.assertEqual(recon.discrepancy_type, 'SHORTAGE')
+        self.assertEqual(recon.created_by, self.manager)
+        self.assertFalse(self._adjustments().exists())          # calculation creates no movement
+
+        # Expected and actual are shown separately, with the shortage labelled
+        page = self.client.get(reverse('reconciliation_detail', args=[recon.pk])).content.decode('utf-8')
+        self.assertIn('id="fig-expected">۲۰.۰۰۰ kg', page)
+        self.assertIn('id="fig-actual" style="color: #4338ca;">۱۵.۰۰۰ kg', page)
+        self.assertIn('id="fig-discrepancy">۵.۰۰۰ kg', page)
+        self.assertIn('کسری انبار', page)
+        self.assertIn('این مقدار موجودی انبار است، نه افت', page)
+
+    def test_create_rejects_invalid_dates_products_and_weights(self):
+        from sales.models import PhysicalInventoryReconciliation
+        inactive = Product.objects.create(name="غیرفعال", category=self.cat, is_parent=True, unit="kg", is_active=False)
+        self._login()
+        cases = {
+            'end_before_start': dict(start="2026-10-07", end="2026-10-01"),
+            'bad_date': dict(start="1405/13/40"),
+            'missing_date': dict(end=""),
+            'no_product': dict(product=Product(id=999999)),
+            'inactive_product': dict(product=inactive),
+            'negative_weight': dict(actual="-1"),
+            'malformed_weight': dict(actual="12kg"),
+            'negative_opening': dict(opening="-3"),
+        }
+        for name, kwargs in cases.items():
+            with self.subTest(case=name):
+                res = self._create(**kwargs)
+                self.assertEqual(res.status_code, 400)
+                self.assertFalse(PhysicalInventoryReconciliation.objects.exists())
+        res = self.client.post(reverse('reconciliation_create'), {'product': 'abc', 'start_date': '2026-10-01', 'end_date': '2026-10-07'})
+        self.assertEqual(res.status_code, 400)
+        # Entered values are preserved on error
+        res = self._create(actual="-1")
+        self.assertContains(res, 'value="-1"', status_code=400)
+        self.assertContains(res, 'value="2026-10-01"', status_code=400)
+
+    def test_duplicate_or_overlapping_period_is_rejected_with_message(self):
+        from sales.models import PhysicalInventoryReconciliation
+        self._login()
+        self._create()
+        res = self._create(start="2026-10-05", end="2026-10-10")
+        self.assertEqual(res.status_code, 400)
+        self.assertContains(res, "همپوشانی", status_code=400)
+        self.assertEqual(PhysicalInventoryReconciliation.objects.count(), 1)
+
+    # -- physical count ----------------------------------------------------------------------
+    def test_count_entry_recalculates_and_rejects_negative_weight(self):
+        self._login()
+        self._create(actual="")
+        recon = self._recon()
+        self.assertEqual(recon.status, 'DRAFT')
+        self.assertIsNone(recon.actual_physical_closing_stock_kg)
+        url = reverse('reconciliation_count', args=[recon.pk])
+
+        res = self.client.post(url, {'actual_physical_closing_stock': '-2', 'opening_stock': '0', 'is_opening_verified': 'on'})
+        self.assertEqual(res.status_code, 400)
+        self.assertContains(res, 'value="-2"', status_code=400)
+        recon.refresh_from_db()
+        self.assertIsNone(recon.actual_physical_closing_stock_kg)
+
+        res = self.client.post(url, {'actual_physical_closing_stock': '۱۵.۰۰۰۴', 'opening_stock': '0', 'is_opening_verified': 'on'})
+        self.assertRedirects(res, reverse('reconciliation_detail', args=[recon.pk]))
+        recon.refresh_from_db()
+        self.assertEqual(recon.actual_physical_closing_stock_kg, Decimal("15.000"))   # normalized by the service
+        self.assertEqual(recon.discrepancy_kg, Decimal("5.000"))
+        self.assertEqual(recon.status, 'CALCULATED')
+
+    def test_approved_and_closed_records_cannot_be_edited_through_ui(self):
+        self._login()
+        self._create()
+        recon = self._recon()
+        self.client.post(reverse('reconciliation_approve', args=[recon.pk]))
+        for status in ('APPROVED', 'CLOSED'):
+            with self.subTest(status=status):
+                if status == 'CLOSED':
+                    self.client.post(reverse('reconciliation_close', args=[recon.pk]))
+                recon.refresh_from_db()
+                self.assertEqual(recon.status, status)
+                page = self.client.get(reverse('reconciliation_detail', args=[recon.pk])).content.decode('utf-8')
+                self.assertNotIn(reverse('reconciliation_count', args=[recon.pk]), page)
+                res = self.client.post(reverse('reconciliation_count', args=[recon.pk]),
+                                       {'actual_physical_closing_stock': '1', 'opening_stock': '0', 'is_opening_verified': 'on'},
+                                       follow=True)
+                self.assertContains(res, "قابل ویرایش نیست")
+                recon.refresh_from_db()
+                self.assertEqual(recon.actual_physical_closing_stock_kg, Decimal("15.000"))
+
+    # -- approval ------------------------------------------------------------------------------
+    def test_incomplete_reconciliation_cannot_be_approved(self):
+        self._login()
+        self._create(actual="")
+        recon = self._recon()
+        res = self.client.post(reverse('reconciliation_approve', args=[recon.pk]), follow=True)
+        self.assertContains(res, "موجودی عینی فیزیکی")
+        recon.refresh_from_db()
+        self.assertEqual(recon.status, 'DRAFT')
+        self.assertNotContains(self.client.get(reverse('reconciliation_detail', args=[recon.pk])),
+                               reverse('reconciliation_approve', args=[recon.pk]))
+
+    def test_approval_calls_service_without_adjustment_by_default(self):
+        from unittest import mock
+        from sales import services
+        self._login()
+        self._create()
+        recon = self._recon()
+        with mock.patch('sales.views.approve_physical_reconciliation',
+                        wraps=services.approve_physical_reconciliation) as approve:
+            res = self.client.post(reverse('reconciliation_approve', args=[recon.pk]), follow=True)
+        self.assertEqual(approve.call_count, 1)
+        self.assertFalse(approve.call_args.kwargs['apply_stock_adjustment'])
+        self.assertEqual(approve.call_args.kwargs['user'], self.manager)
+        recon.refresh_from_db()
+        self.assertEqual(recon.status, 'APPROVED')
+        self.assertFalse(self._adjustments().exists())
+        self.assertContains(res, "هیچ تعدیلی در دفتر انبار ثبت نشد")
+
+    def test_adjustment_requires_explicit_confirmation_and_is_never_duplicated(self):
+        self._login()
+        self._create()
+        recon = self._recon()
+        url = reverse('reconciliation_approve', args=[recon.pk])
+        res = self.client.post(url, {'apply_stock_adjustment': 'on'}, follow=True)     # no confirmation
+        self.assertContains(res, "تأیید آگاهی")
+        recon.refresh_from_db()
+        self.assertEqual(recon.status, 'CALCULATED')
+        self.assertFalse(self._adjustments().exists())
+
+        stock_before = get_parent_stock_balance(self.parent)
+        for _ in range(3):                                                              # retries
+            self.client.post(url, {'apply_stock_adjustment': 'on', 'confirm_stock_adjustment': 'on'})
+        recon.refresh_from_db()
+        self.assertEqual(recon.status, 'APPROVED')
+        self.assertEqual(self._adjustments().count(), 1)
+        self.assertEqual(self._adjustments().get().net_weight_kg, Decimal("5.000"))
+        self.assertEqual(get_parent_stock_balance(self.parent), stock_before - Decimal("5.000"))
+        page = self.client.get(reverse('reconciliation_detail', args=[recon.pk]))
+        self.assertContains(page, f"۵.۰۰۰ kg ({recon.document_number})")
+
+    def test_stale_calculation_shows_safe_message_and_is_not_approved(self):
+        self._login()
+        self._create()
+        recon = self._recon()
+        finalize_goods_receipt(
+            document_number="REC-UI-LATE", supplier_name="کشتارگاه", product=self.parent,
+            gross_weight_kg=Decimal("10.000"), tare_entries=[], document_date=date(2026, 10, 6),
+        )
+        res = self.client.post(reverse('reconciliation_approve', args=[recon.pk]),
+                               {'apply_stock_adjustment': 'on', 'confirm_stock_adjustment': 'on'}, follow=True)
+        self.assertContains(res, "مجدداً محاسبه")
+        self.assertNotContains(res, "Traceback")
+        recon.refresh_from_db()
+        self.assertEqual(recon.status, 'CALCULATED')
+        self.assertFalse(self._adjustments().exists())
+
+    def test_service_errors_are_shown_without_internal_details(self):
+        from unittest import mock
+        from sales.services import StaleReconciliationError
+        self._login()
+        self._create()
+        recon = self._recon()
+        with mock.patch('sales.views.approve_physical_reconciliation', side_effect=StaleReconciliationError("گردش تغییر کرد")):
+            res = self.client.post(reverse('reconciliation_approve', args=[recon.pk]), follow=True)
+        self.assertContains(res, "گردش تغییر کرد")
+        with mock.patch('sales.views.close_physical_reconciliation', side_effect=RuntimeError("secret internals")):
+            with self.assertLogs('sales.views', level='ERROR'):
+                res = self.client.post(reverse('reconciliation_close', args=[recon.pk]), follow=True)
+        self.assertContains(res, "خطای غیرمنتظره")
+        self.assertNotContains(res, "secret internals")
+
+    # -- closing -------------------------------------------------------------------------------
+    def test_close_calls_service_and_rejects_invalid_transition(self):
+        from unittest import mock
+        from sales import services
+        self._login()
+        self._create()
+        recon = self._recon()
+        res = self.client.post(reverse('reconciliation_close', args=[recon.pk]), follow=True)   # CALCULATED -> refused
+        self.assertContains(res, "فقط اسناد انبارگردانی تاییدشده")
+        recon.refresh_from_db()
+        self.assertEqual(recon.status, 'CALCULATED')
+
+        self.client.post(reverse('reconciliation_approve', args=[recon.pk]))
+        with mock.patch('sales.views.close_physical_reconciliation',
+                        wraps=services.close_physical_reconciliation) as close:
+            self.client.post(reverse('reconciliation_close', args=[recon.pk]))
+            self.client.post(reverse('reconciliation_close', args=[recon.pk]))                 # idempotent retry
+        self.assertEqual(close.call_count, 2)
+        recon.refresh_from_db()
+        self.assertEqual(recon.status, 'CLOSED')
+        res = self.client.post(reverse('reconciliation_approve', args=[recon.pk]), follow=True)
+        recon.refresh_from_db()
+        self.assertEqual(recon.status, 'CLOSED')
+
+    # -- period transition -----------------------------------------------------------------------
+    def test_next_period_opens_from_previous_approved_physical_count(self):
+        self._login()
+        self._create()
+        first = self._recon()
+        self.client.post(reverse('reconciliation_approve', args=[first.pk]))
+        res = self._create(start="2026-10-08", end="2026-10-14", actual="15", opening="", verified=False)
+        from sales.models import PhysicalInventoryReconciliation
+        second = PhysicalInventoryReconciliation.objects.exclude(pk=first.pk).get()
+        self.assertRedirects(res, reverse('reconciliation_detail', args=[second.pk]))
+        self.assertEqual(second.opening_stock_kg, Decimal("15.000"))     # not 20, not 15 ± 5
+        self.assertEqual(second.discrepancy_kg, Decimal("0.000"))
+        page = self.client.get(reverse('reconciliation_detail', args=[second.pk]))
+        self.assertContains(page, f"از توزین سند {first.document_number}")
+        self.assertNotContains(page, 'name="opening_stock"')
+        # A submitted opening cannot override the previous count: the UI ignores it, the service keeps 15
+        self.client.post(reverse('reconciliation_count', args=[second.pk]),
+                         {'actual_physical_closing_stock': '14', 'opening_stock': '20', 'is_opening_verified': 'on'})
+        second.refresh_from_db()
+        self.assertEqual(second.opening_stock_kg, Decimal("15.000"))
+        self.assertEqual(second.discrepancy_kg, Decimal("1.000"))
+
+    def test_loss_report_links_to_reconciliation_detail(self):
+        self._login()
+        self._create()
+        recon = self._recon()
+        res = self.client.get(reverse('report_loss') + '?preset=all')
+        self.assertContains(res, reverse('reconciliation_detail', args=[recon.pk]))
+
+
+
+class ReconciliationNavigationAndLoginTestCase(TestCase):
+    """Reconciliation pages live inside the MeatShop UI: own login, shared layout, menu entry, no Admin detours."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        self.cat = get_test_category("مرغ آزمون منو", "chicken-recon-nav")
+        self.parent = Product.objects.create(name="مرغ کامل منو", category=self.cat, is_parent=True, unit="kg")
+        self.manager = User.objects.create_user(username="nav_manager", password="Nav-Test-Only-1", is_staff=True)
+        self.clerk = User.objects.create_user(username="nav_clerk", password="Nav-Test-Only-2")
+
+    def _create_recon(self):
+        from sales.services import calculate_physical_reconciliation
+        return calculate_physical_reconciliation(
+            product=self.parent, start_date=date(2026, 10, 1), end_date=date(2026, 10, 7),
+            opening_stock=Decimal("0"), is_opening_verified=True,
+            actual_physical_closing_stock=Decimal("0"), save_record=True, user=self.manager,
+        )
+
+    def test_urls_resolve_to_reconciliation_views(self):
+        from django.urls import resolve
+        from sales import views
+        expected = {
+            ('reconciliation_list', ()): ('/reconciliations/', views.reconciliation_list_view),
+            ('reconciliation_create', ()): ('/reconciliations/new/', views.reconciliation_create_view),
+            ('reconciliation_detail', (5,)): ('/reconciliations/5/', views.reconciliation_detail_view),
+            ('reconciliation_count', (5,)): ('/reconciliations/5/count/', views.reconciliation_count_view),
+            ('reconciliation_approve', (5,)): ('/reconciliations/5/approve/', views.reconciliation_approve_view),
+            ('reconciliation_close', (5,)): ('/reconciliations/5/close/', views.reconciliation_close_view),
+        }
+        for (name, args), (path, func) in expected.items():
+            with self.subTest(name=name):
+                self.assertEqual(reverse(name, args=args), path)
+                self.assertEqual(resolve(path).func, func)
+        self.assertEqual(reverse('login'), '/accounts/login/')
+
+    def test_menu_link_is_available_on_operational_pages(self):
+        for url in (reverse('product_list'), reverse('inventory_overview'), reverse('report_loss')):
+            with self.subTest(url=url):
+                res = self.client.get(url)
+                self.assertEqual(res.status_code, 200)
+                self.assertContains(res, f'<a href="{reverse("reconciliation_list")}" class="nav-link')
+
+    def test_pages_render_in_shared_layout_for_authorized_user(self):
+        recon = self._create_recon()
+        self.client.force_login(self.manager)
+        for name, args, template in (
+            ('reconciliation_list', [], 'sales/reconciliation_list.html'),
+            ('reconciliation_create', [], 'sales/reconciliation_form.html'),
+            ('reconciliation_detail', [recon.pk], 'sales/reconciliation_detail.html'),
+        ):
+            with self.subTest(page=name):
+                res = self.client.get(reverse(name, args=args))
+                self.assertEqual(res.status_code, 200)
+                self.assertTemplateUsed(res, 'base.html')
+                self.assertTemplateUsed(res, template)
+                self.assertContains(res, 'nav-link active">انبارگردانی</a>')
+                self.assertContains(res, 'id="nav-logout-form"')
+
+    def test_anonymous_user_uses_in_app_login_and_returns_to_page(self):
+        target = reverse('reconciliation_list')
+        res = self.client.get(target)
+        self.assertRedirects(res, f"{reverse('login')}?next={target}", fetch_redirect_response=False)
+
+        login_page = self.client.get(res['Location'])
+        self.assertEqual(login_page.status_code, 200)
+        self.assertTemplateUsed(login_page, 'base.html')
+        self.assertTemplateUsed(login_page, 'registration/login.html')
+        self.assertContains(login_page, f'name="next" value="{target}"')
+
+        bad = self.client.post(reverse('login'), {'username': 'nav_manager', 'password': 'wrong', 'next': target})
+        self.assertEqual(bad.status_code, 200)
+        self.assertContains(bad, "نام کاربری یا گذرواژه نادرست است")
+
+        ok = self.client.post(reverse('login'), {'username': 'nav_manager', 'password': 'Nav-Test-Only-1', 'next': target})
+        self.assertRedirects(ok, target)
+        self.assertEqual(self.client.get(target).status_code, 200)
+
+        out = self.client.post(reverse('logout'))
+        self.assertRedirects(out, reverse('login'), fetch_redirect_response=False)
+        self.assertEqual(self.client.get(target).status_code, 302)
+
+    def test_unauthorized_user_gets_403_page_in_shared_layout(self):
+        self.client.force_login(self.clerk)
+        res = self.client.get(reverse('reconciliation_list'))
+        self.assertEqual(res.status_code, 403)
+        self.assertTemplateUsed(res, 'base.html')
+        self.assertTemplateUsed(res, 'sales/reconciliation_forbidden.html')
+        self.assertContains(res, "nav_clerk", status_code=403)
+
+    def test_no_operational_action_redirects_to_admin(self):
+        recon = self._create_recon()
+        self.client.force_login(self.manager)
+        responses = [
+            self.client.post(reverse('reconciliation_create'), {
+                'product': str(self.parent.id), 'start_date': '2026-10-08', 'end_date': '2026-10-14',
+            }),
+            self.client.post(reverse('reconciliation_count', args=[recon.pk]),
+                             {'actual_physical_closing_stock': '0', 'opening_stock': '0', 'is_opening_verified': 'on'}),
+            self.client.post(reverse('reconciliation_approve', args=[recon.pk])),
+            self.client.post(reverse('reconciliation_close', args=[recon.pk])),
+            self.client.post(reverse('reconciliation_close', args=[recon.pk])),     # repeated: friendly, not admin
+        ]
+        for res in responses:
+            with self.subTest(status=res.status_code):
+                self.assertNotIn('/admin/', res.get('Location', ''))
+                if res.status_code == 302:
+                    self.assertTrue(res['Location'].startswith('/reconciliations/'))
+        recon.refresh_from_db()
+        self.assertEqual(recon.status, 'CLOSED')
+
+    def test_post_only_actions_and_safe_responses(self):
+        recon = self._create_recon()
+        self.client.force_login(self.manager)
+        for name in ('reconciliation_count', 'reconciliation_approve', 'reconciliation_close'):
+            with self.subTest(action=name):
+                self.assertEqual(self.client.get(reverse(name, args=[recon.pk])).status_code, 405)
+        self.assertEqual(self.client.get('/reconciliations/abc/').status_code, 404)
+        self.assertEqual(self.client.get(reverse('reconciliation_detail', args=[987654])).status_code, 404)
+        # A service validation error comes back as a message on the detail page
+        res = self.client.post(reverse('reconciliation_close', args=[recon.pk]), follow=True)
+        self.assertContains(res, "فقط اسناد انبارگردانی تاییدشده")
+        self.assertTemplateUsed(res, 'sales/reconciliation_detail.html')

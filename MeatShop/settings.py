@@ -28,9 +28,10 @@ ALLOWED_HOSTS = ['*']
 # Scale mode: mock (development/tests) | keli_xk3118t1 (hardware, Phase 11+)
 SCALE_MODE = env('SCALE_MODE', default='mock')
 
-# Currency display unit: TOMAN | RIAL
-# Monetary database fields store whole-number Rial. This controls display formatting only.
-CURRENCY_DISPLAY_UNIT = env('CURRENCY_DISPLAY_UNIT', default='TOMAN')
+# Currency display unit. Monetary database fields store whole-number Rial and every monetary
+# display (screens, printed documents, reports) is shown in Rial. Toman appears only as an
+# approximate hint under price-entry fields. Kept for backward compatibility of .env files.
+CURRENCY_DISPLAY_UNIT = env('CURRENCY_DISPLAY_UNIT', default='RIAL')
 
 # Application definition
 INSTALLED_APPS = [
@@ -116,3 +117,8 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATICFILES_DIRS = [BASE_DIR / 'static'] if (BASE_DIR / 'static').exists() else []
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Operational sign-in uses the in-app login page (MeatShop layout), not the Django Admin login
+LOGIN_URL = 'login'
+LOGIN_REDIRECT_URL = 'reconciliation_list'
+LOGOUT_REDIRECT_URL = 'login'

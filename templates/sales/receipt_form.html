@@ -214,7 +214,8 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label" style="font-size: 0.85rem;">قیمت واحد خرید (ریال / kg):</label>
-                    <input type="number" id="active-unit-price" class="form-input weight-input" placeholder="اختیاری (مثلاً: ۲۵۰۰۰۰۰)" min="0" dir="ltr">
+                    <input type="number" id="active-unit-price" class="form-input weight-input" placeholder="اختیاری (مثلاً: ۲۵۰۰۰۰۰)" min="0" step="1" dir="ltr">
+                    <span id="active-unit-price-hint" style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-top: 2px;"></span>
                 </div>
                 <div class="form-group">
                     <label class="form-label" style="font-size: 0.85rem;">وضعیت سلامت و کیفیت:</label>
@@ -582,7 +583,11 @@
 
         const pkgCount = parseInt(document.getElementById('active-package-count').value) || null;
         const unitPriceVal = document.getElementById('active-unit-price').value.trim();
-        const unitPrice = unitPriceVal ? parseFloat(unitPriceVal) : null;
+        if (unitPriceVal && !/^\d+$/.test(unitPriceVal)) {
+            showActiveError('قیمت واحد خرید باید عدد صحیح و نامنفی به ریال باشد.');
+            return;
+        }
+        const unitPrice = unitPriceVal ? parseInt(unitPriceVal, 10) : null;
         const conditionNotes = document.getElementById('active-condition-notes').value.trim();
         const remarks = document.getElementById('active-line-remarks').value.trim();
         const { entries } = getActiveTareDetails();
@@ -593,7 +598,7 @@
             gross_weight_kg: gross,
             total_tare_weight_kg: tareKg,
             net_weight_kg: netKg,
-            unit_price: unitPrice,
+            unit_price_rial: unitPrice,
             package_count: pkgCount,
             condition_notes: conditionNotes,
             remarks: remarks,
@@ -603,6 +608,7 @@
         // Reset active line inputs for next cut
         grossInput.value = '';
         document.getElementById('active-unit-price').value = '';
+        document.getElementById('active-unit-price-hint').textContent = '';
         document.getElementById('active-package-count').value = '';
         document.getElementById('active-condition-notes').value = '';
         document.getElementById('active-line-remarks').value = '';
@@ -672,7 +678,7 @@
             if (item.package_count) totPkgs += item.package_count;
 
             const notesCombined = [item.condition_notes, item.remarks].filter(Boolean).join(' | ') || '—';
-            const priceFormatted = item.unit_price ? Number(item.unit_price).toLocaleString('fa-IR') + ' ریال' : '—';
+            const priceFormatted = item.unit_price_rial !== null && item.unit_price_rial !== undefined ? formatRial(item.unit_price_rial) : '—';
 
             html += `
                 <tr>
@@ -710,6 +716,10 @@
             });
         });
     }
+
+    document.getElementById('active-unit-price').addEventListener('input', function() {
+        document.getElementById('active-unit-price-hint').textContent = formatTomanHint(this.value);
+    });
 
     renderCommittedReceiptTable();
 })();

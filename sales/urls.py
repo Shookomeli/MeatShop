@@ -22,6 +22,14 @@ urlpatterns = [
     path('invoices/<int:pk>/', views.invoice_detail_view, name='invoice_detail'),
     path('invoices/<int:pk>/cancel/', views.invoice_cancel_view, name='invoice_cancel'),
 
+    # Physical Inventory Reconciliation (انبارگردانی)
+    path('reconciliations/', views.reconciliation_list_view, name='reconciliation_list'),
+    path('reconciliations/new/', views.reconciliation_create_view, name='reconciliation_create'),
+    path('reconciliations/<int:pk>/', views.reconciliation_detail_view, name='reconciliation_detail'),
+    path('reconciliations/<int:pk>/count/', views.reconciliation_count_view, name='reconciliation_count'),
+    path('reconciliations/<int:pk>/approve/', views.reconciliation_approve_view, name='reconciliation_approve'),
+    path('reconciliations/<int:pk>/close/', views.reconciliation_close_view, name='reconciliation_close'),
+
     # Phase 9: Reports & Data Analytics (گزارش‌ها و تحلیل آمار)
     path('reports/', views.reports_hub_view, name='reports_hub'),
     path('reports/sales/', views.sales_summary_report_view, name='report_sales'),

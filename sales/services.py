@@ -47,6 +47,21 @@ class IncompleteReconciliationError(BusinessLogicError):
     pass
 
 
+class OverlappingReconciliationError(BusinessLogicError):
+    """Raised when a reconciliation period overlaps another one for the same product / pool."""
+    pass
+
+
+class OpeningStockMismatchError(BusinessLogicError):
+    """Raised when opening stock differs from the previous approved period's actual physical closing stock."""
+    pass
+
+
+class StaleReconciliationError(BusinessLogicError):
+    """Raised when stock movements changed after a reconciliation was calculated; it must be recalculated."""
+    pass
+
+
 class InvalidTareWeightError(BusinessLogicError):
     """Raised when tare weight exceeds or equals gross weight."""
     pass
@@ -783,6 +798,47 @@ def finalize_invoice(
     return invoice
 
 
+SALE_PRICE_SOURCE_LABELS = {
+    'issue_item': "قیمت ثبت‌شده در ردیف حواله",
+    'issue': "قیمت ثبت‌شده در حواله",
+    'catalogue': "قیمت فروش کالا (کاتالوگ)",
+}
+PURCHASE_PRICE_SOURCE_LABELS = {
+    'receipt_item': "قیمت خرید ثبت‌شده در ردیف رسید",
+    'receipt': "قیمت خرید ثبت‌شده در رسید",
+}
+
+
+def resolve_sale_price_default(issue, item=None) -> tuple:
+    """
+    Default SALE unit price (Rial) for an issue line and where it came from:
+    issue line -> issue header -> product catalogue sale price. Purchase cost from goods
+    receipts is never a sale-price source. Returns (price or None, source key or None).
+    """
+    candidates = []
+    if item is not None:
+        candidates.append(('issue_item', item.unit_price_rial))
+    candidates.append(('issue', getattr(issue, 'unit_price_rial', None)))
+    product = item.product if item is not None else issue.product
+    candidates.append(('catalogue', getattr(product, 'price_per_unit_rial', None)))
+    for source, price in candidates:
+        if price:
+            return int(price), source
+    return None, None
+
+
+def resolve_purchase_price_default(receipt, item=None) -> tuple:
+    """Default PURCHASE unit price (Rial): receipt line -> receipt header. Never the catalogue sale price."""
+    candidates = []
+    if item is not None:
+        candidates.append(('receipt_item', getattr(item, 'unit_price_rial', None)))
+    candidates.append(('receipt', getattr(receipt, 'unit_price_rial', None)))
+    for source, price in candidates:
+        if price:
+            return int(price), source
+    return None, None
+
+
 @transaction.atomic
 def generate_invoice_from_source_documents(
     source_type: str,  # 'SALE' or 'PURCHASE'
@@ -870,15 +926,11 @@ def generate_invoice_from_source_documents(
             iss_items = list(iss.items.all())
             if iss_items:
                 for item in iss_items:
-                    price_key = f"issue_item_{item.id}"
+                    # Overrides use model-prefixed keys only, so ids of different models never collide
                     price = (
-                        prices_override.get(price_key)
+                        prices_override.get(f"issue_item_{item.id}")
                         or prices_override.get(f"issue_{iss.id}")
-                        or prices_override.get(str(item.id))
-                        or prices_override.get(str(iss.id))
-                        or item.unit_price_rial
-                        or getattr(iss, 'unit_price_rial', None)
-                        or getattr(item.product, 'price_per_unit_rial', None)
+                        or resolve_sale_price_default(iss, item)[0]
                     )
                     if price is None or int(price) <= 0:
                         raise BusinessLogicError(
@@ -899,12 +951,9 @@ def generate_invoice_from_source_documents(
                     )
                     total_rial += line_total
             elif iss.product:
-                price_key = f"issue_{iss.id}"
                 price = (
-                    prices_override.get(price_key)
-                    or prices_override.get(str(iss.id))
-                    or getattr(iss, 'unit_price_rial', None)
-                    or getattr(iss.product, 'price_per_unit_rial', None)
+                    prices_override.get(f"issue_{iss.id}")
+                    or resolve_sale_price_default(iss)[0]
                 )
                 if price is None or int(price) <= 0:
                     raise BusinessLogicError(
@@ -965,14 +1014,10 @@ def generate_invoice_from_source_documents(
             rec_items = list(rec.items.all())
             if rec_items:
                 for item in rec_items:
-                    price_key = f"receipt_item_{item.id}"
                     price = (
-                        prices_override.get(price_key)
+                        prices_override.get(f"receipt_item_{item.id}")
                         or prices_override.get(f"receipt_{rec.id}")
-                        or prices_override.get(str(item.id))
-                        or prices_override.get(str(rec.id))
-                        or getattr(item, 'unit_price_rial', None)
-                        or getattr(rec, 'unit_price_rial', None)
+                        or resolve_purchase_price_default(rec, item)[0]
                     )
                     if price is None or int(price) <= 0:
                         raise BusinessLogicError(
@@ -995,11 +1040,9 @@ def generate_invoice_from_source_documents(
                     )
                     total_rial += line_total
             elif rec.product and (rec.aggregate_net_weight > Decimal('0.000') or rec.net_weight_kg is not None):
-                price_key = f"receipt_{rec.id}"
                 price = (
-                    prices_override.get(price_key)
-                    or prices_override.get(str(rec.id))
-                    or getattr(rec, 'unit_price_rial', None)
+                    prices_override.get(f"receipt_{rec.id}")
+                    or resolve_purchase_price_default(rec)[0]
                 )
                 if price is None or int(price) <= 0:
                     raise BusinessLogicError(
@@ -1327,9 +1370,20 @@ def calculate_confirmed_physical_loss(parent_product: Product = None, start_date
         else:
             match_count += 1
 
+    # Calculated but not yet approved: shown as potential loss / surplus for review, never as confirmed loss
+    pending_review_records = [
+        rec for rec in excluded_records
+        if rec.status == ReconciliationStatus.CALCULATED and rec.is_complete and rec.discrepancy_kg is not None
+    ]
+    pending_loss_kg = sum((r.discrepancy_kg for r in pending_review_records if r.discrepancy_kg > 0), Decimal('0.000'))
+    pending_surplus_kg = sum((-r.discrepancy_kg for r in pending_review_records if r.discrepancy_kg < 0), Decimal('0.000'))
+
     return {
         'confirmed_records': confirmed_records,
         'excluded_records': excluded_records,
+        'pending_review_records': pending_review_records,
+        'pending_potential_loss_kg': pending_loss_kg,
+        'pending_surplus_kg': pending_surplus_kg,
         'confirmed_loss_kg': shortage_kg,
         'confirmed_surplus_kg': surplus_kg,
         'shortage_count': shortage_count,
@@ -1350,6 +1404,85 @@ def is_user_authorized_for_reconciliation(user) -> bool:
     if hasattr(user, 'has_perm') and user.has_perm('sales.approve_reconciliation'):
         return True
     return False
+
+
+def _find_overlapping_reconciliation(product, start_date, end_date, exclude_pk=None, statuses=None):
+    """
+    Returns another reconciliation of the same product whose period overlaps [start_date, end_date].
+    The pool flag is ignored: both flags of one product count the same physical stock.
+    """
+    qs = PhysicalInventoryReconciliation.objects.filter(
+        product=product,
+        period_start_date__lte=end_date,
+        period_end_date__gte=start_date,
+    )
+    if exclude_pk:
+        qs = qs.exclude(pk=exclude_pk)
+    if statuses:
+        qs = qs.filter(status__in=statuses)
+    return qs.order_by('period_start_date', 'id').first()
+
+
+def _previous_closed_period(product, is_parent_pool, start_date):
+    """Latest approved / closed reconciliation ending strictly before start_date for the same product / pool."""
+    return PhysicalInventoryReconciliation.objects.filter(
+        product=product,
+        is_parent_pool=bool(is_parent_pool),
+        status__in=AUTHORITATIVE_RECONCILIATION_STATUSES,
+        period_end_date__lt=start_date,
+        actual_physical_closing_stock_kg__isnull=False,
+    ).order_by('-period_end_date', '-id').first()
+
+
+def _period_flows(product, is_parent_pool, start_date, end_date) -> tuple:
+    """
+    Period receipts and issues (kg) for a product / pool from finalized stock movements.
+    Invoices never create movements, so they cannot add to these totals. Reconciliation
+    ADJUSTMENT movements are excluded so an approved discrepancy is never counted again.
+    """
+    if is_parent_pool and product.is_parent:
+        qs_in = StockMovement.objects.filter(
+            product=product,
+            direction=StockMovementDirection.IN
+        ).exclude(movement_type=StockMovementType.ADJUSTMENT)
+
+        qs_out = StockMovement.objects.filter(
+            Q(product=product) | Q(parent_product=product, remarks__startswith=PARENT_FALLBACK_PREFIX),
+            direction=StockMovementDirection.OUT
+        ).exclude(movement_type=StockMovementType.ADJUSTMENT)
+    else:
+        qs_in = StockMovement.objects.filter(
+            product=product,
+            direction=StockMovementDirection.IN
+        ).exclude(movement_type=StockMovementType.ADJUSTMENT)
+
+        qs_out = StockMovement.objects.filter(
+            product=product,
+            direction=StockMovementDirection.OUT
+        ).exclude(remarks__startswith=PARENT_FALLBACK_PREFIX).exclude(movement_type=StockMovementType.ADJUSTMENT)
+
+    qs_in = qs_in.filter(document_date__gte=start_date, document_date__lte=end_date)
+    qs_out = qs_out.filter(document_date__gte=start_date, document_date__lte=end_date)
+
+    period_receipts = qs_in.aggregate(total=Sum('net_weight_kg'))['total'] or Decimal('0.000')
+    period_issues = qs_out.aggregate(total=Sum('net_weight_kg'))['total'] or Decimal('0.000')
+    return period_receipts, period_issues
+
+
+def _normalize_counted_weight(value, label: str):
+    """Normalizes a physically weighed / opening stock value; None stays None (not weighed)."""
+    if value is None or value == '':
+        return None
+    weight = normalize_weight_kg(value)
+    if weight < Decimal('0.000'):
+        raise BusinessLogicError(f"{label} نمی‌تواند منفی باشد.")
+    return weight
+
+
+def _stored_reconciliation_status(reconciliation):
+    if not reconciliation or not reconciliation.pk:
+        return None
+    return PhysicalInventoryReconciliation.objects.filter(pk=reconciliation.pk).values_list('status', flat=True).first()
 
 
 def calculate_physical_reconciliation(
@@ -1377,15 +1510,27 @@ def calculate_physical_reconciliation(
     Rules:
     - Calculation alone creates NO stock movements.
     - Opening stock comes from the previous approved period's actual physical closing stock,
-      or explicitly verified opening stock. Never invents an opening balance.
+      or explicitly verified opening stock. Never invents an opening balance. When a previous
+      approved period exists, an explicit opening stock must equal its actual closing stock;
+      the previous period's discrepancy is never carried forward.
+    - Saved periods must not overlap another period of the same product / pool, so the same
+      loss can never be recorded twice.
     - If actual physical closing stock is missing, reconciliation is marked incomplete.
     - Zero/negative denominators in percentage calculation are handled safely without exceptions.
     - Approved/closed reconciliations cannot be recalculated.
     - Parent and child stock pools are segregated according to Phase 1 rules to prevent double counting.
     """
     if reconciliation_instance and reconciliation_instance.pk:
-        if reconciliation_instance.status in [ReconciliationStatus.APPROVED, ReconciliationStatus.CLOSED]:
+        # The stored status is authoritative; a stale in-memory instance must not unlock a record
+        stored_status = _stored_reconciliation_status(reconciliation_instance)
+        if (
+            reconciliation_instance.status in AUTHORITATIVE_RECONCILIATION_STATUSES
+            or stored_status in AUTHORITATIVE_RECONCILIATION_STATUSES
+        ):
             raise ReconciliationLockedError("سند انبارگردانی تاییدشده یا بسته‌شده غیرقابل تغییر و محاسبه مجدد است.")
+
+    opening_stock = _normalize_counted_weight(opening_stock, "موجودی اول دوره")
+    actual_physical_closing_stock = _normalize_counted_weight(actual_physical_closing_stock, "موجودی عینی توزین‌شده")
 
     if is_parent_pool is None:
         is_parent_pool = product.is_parent
@@ -1403,70 +1548,45 @@ def calculate_physical_reconciliation(
         from .date_utils import parse_jalali_or_gregorian_date
         end_date = parse_jalali_or_gregorian_date(end_date)
 
-    # 1. Resolve Opening Stock
+    if end_date < start_date:
+        raise BusinessLogicError("تاریخ پایان دوره انبارگردانی نمی‌تواند قبل از تاریخ شروع باشد.")
+
+    if save_record:
+        overlap = _find_overlapping_reconciliation(
+            product, start_date, end_date,
+            exclude_pk=reconciliation_instance.pk if reconciliation_instance else None,
+        )
+        if overlap:
+            raise OverlappingReconciliationError(
+                f"دوره انبارگردانی با سند {overlap.document_number} همپوشانی دارد و امکان ثبت مجدد کسری وجود ندارد."
+            )
+
+    # 1. Resolve Opening Stock: previous approved period's actual physical closing stock
     resolved_opening_stock = None
     resolved_is_verified = False
+    prev_recon = _previous_closed_period(product, is_parent_pool, start_date)
 
-    if opening_stock is not None:
-        resolved_opening_stock = Decimal(str(opening_stock))
+    if prev_recon:
+        if opening_stock is not None and opening_stock != prev_recon.actual_physical_closing_stock_kg:
+            raise OpeningStockMismatchError(
+                f"موجودی اول دوره باید برابر موجودی عینی پایان دوره قبل ({prev_recon.document_number}) باشد."
+            )
+        resolved_opening_stock = prev_recon.actual_physical_closing_stock_kg
+        resolved_is_verified = True
+    elif opening_stock is not None:
+        resolved_opening_stock = opening_stock
         resolved_is_verified = is_opening_verified
-    else:
-        # Check prior approved or closed reconciliation for this product / pool
-        prev_recon = PhysicalInventoryReconciliation.objects.filter(
-            product=product,
-            is_parent_pool=bool(is_parent_pool),
-            status__in=[ReconciliationStatus.APPROVED, ReconciliationStatus.CLOSED],
-            period_end_date__lte=start_date,
-        ).order_by('-period_end_date', '-id').first()
-
-        if prev_recon and prev_recon.actual_physical_closing_stock_kg is not None:
-            resolved_opening_stock = prev_recon.actual_physical_closing_stock_kg
-            resolved_is_verified = True
-        else:
-            resolved_opening_stock = None
-            resolved_is_verified = False
 
     # 2. Calculate Period Receipts and Issues without double-counting parent-child stock
-    if is_parent_pool and product.is_parent:
-        qs_in = StockMovement.objects.filter(
-            product=product,
-            direction=StockMovementDirection.IN
-        ).exclude(movement_type=StockMovementType.ADJUSTMENT)
-
-        qs_out = StockMovement.objects.filter(
-            Q(product=product) | Q(parent_product=product, remarks__startswith=PARENT_FALLBACK_PREFIX),
-            direction=StockMovementDirection.OUT
-        ).exclude(movement_type=StockMovementType.ADJUSTMENT)
-    else:
-        qs_in = StockMovement.objects.filter(
-            product=product,
-            direction=StockMovementDirection.IN
-        ).exclude(movement_type=StockMovementType.ADJUSTMENT)
-
-        qs_out = StockMovement.objects.filter(
-            product=product,
-            direction=StockMovementDirection.OUT
-        ).exclude(remarks__startswith=PARENT_FALLBACK_PREFIX).exclude(movement_type=StockMovementType.ADJUSTMENT)
-
-    if start_date:
-        qs_in = qs_in.filter(document_date__gte=start_date)
-        qs_out = qs_out.filter(document_date__gte=start_date)
-    if end_date:
-        qs_in = qs_in.filter(document_date__lte=end_date)
-        qs_out = qs_out.filter(document_date__lte=end_date)
-
-    period_receipts = qs_in.aggregate(total=Sum('net_weight_kg'))['total'] or Decimal('0.000')
-    period_issues = qs_out.aggregate(total=Sum('net_weight_kg'))['total'] or Decimal('0.000')
+    period_receipts, period_issues = _period_flows(product, is_parent_pool, start_date, end_date)
 
     # 3. Calculate Expected Closing Stock
     expected_closing_stock = None
     if resolved_opening_stock is not None and resolved_is_verified:
         expected_closing_stock = resolved_opening_stock + period_receipts - period_issues
 
-    # 4. Actual Physical Closing Stock
-    actual_closing_val = None
-    if actual_physical_closing_stock is not None:
-        actual_closing_val = Decimal(str(actual_physical_closing_stock))
+    # 4. Actual Physical Closing Stock (None = not yet weighed; never treated as zero)
+    actual_closing_val = actual_physical_closing_stock
 
     # 5. Discrepancy
     discrepancy = None
@@ -1553,35 +1673,73 @@ def approve_physical_reconciliation(
     - Only authorized users (staff, superusers, or permissions) can approve.
     - Cannot approve incomplete reconciliation (missing physical closing count or unverified opening stock).
     - Repeated approval is idempotent and does NOT create duplicate stock adjustment movements.
+    - Cannot approve a period overlapping an approved / closed period of the same product, or whose
+      opening stock no longer equals the previous approved period's actual physical closing stock.
+    - Cannot approve a calculation made stale by stock movements finalized after it was calculated.
+    - Decisions use the stored database row, never a stale in-memory instance.
     - If apply_stock_adjustment=True and discrepancy != 0, creates an explicit, traceable StockMovement
       with movement_type=StockMovementType.ADJUSTMENT.
     - Historical stock movements are NEVER mutated.
     """
     if not is_user_authorized_for_reconciliation(user):
         raise UnauthorizedReconciliationError("کاربر مجاز به تایید یا تصویب انبارگردانی نمی‌باشد.")
-
-    if not reconciliation.is_complete:
-        if reconciliation.actual_physical_closing_stock_kg is None:
-            raise IncompleteReconciliationError("امکان تصویب انبارگردانی بدون ثبت موجودی عینی فیزیکی وجود ندارد.")
-        if reconciliation.opening_stock_kg is None or not reconciliation.is_opening_verified:
-            raise IncompleteReconciliationError("امکان تصویب انبارگردانی بدون تایید موجودی اول دوره وجود ندارد.")
-
-    # Idempotency / Retry Protection: return existing if already approved or closed
-    if reconciliation.status in [ReconciliationStatus.APPROVED, ReconciliationStatus.CLOSED]:
-        return reconciliation
+    if not reconciliation.pk:
+        raise IncompleteReconciliationError("فقط اسناد انبارگردانی ذخیره‌شده قابل تصویب هستند.")
 
     with transaction.atomic():
-        reconciliation.status = ReconciliationStatus.APPROVED
-        reconciliation.approved_by = user
-        reconciliation.approved_at = timezone.now()
-        if idempotency_key:
-            reconciliation.idempotency_key = idempotency_key
-        if notes:
-            reconciliation.notes = (reconciliation.notes + "\n" + notes).strip()
+        stored = PhysicalInventoryReconciliation.objects.select_for_update().select_related('product').get(
+            pk=reconciliation.pk
+        )
 
-        if apply_stock_adjustment and reconciliation.discrepancy_kg and reconciliation.discrepancy_kg != Decimal('0.000'):
-            if not reconciliation.adjustment_movement:
-                disc = reconciliation.discrepancy_kg
+        # Idempotency / Retry Protection: an approved or closed record is returned unchanged
+        if stored.status in AUTHORITATIVE_RECONCILIATION_STATUSES:
+            reconciliation.refresh_from_db()
+            return stored
+
+        if not stored.is_complete:
+            if stored.actual_physical_closing_stock_kg is None:
+                raise IncompleteReconciliationError("امکان تصویب انبارگردانی بدون ثبت موجودی عینی فیزیکی وجود ندارد.")
+            raise IncompleteReconciliationError("امکان تصویب انبارگردانی بدون تایید موجودی اول دوره وجود ندارد.")
+
+        # The same loss must never be approved twice (e.g. rows created outside the calculation service)
+        overlap = _find_overlapping_reconciliation(
+            stored.product, stored.period_start_date, stored.period_end_date,
+            exclude_pk=stored.pk, statuses=AUTHORITATIVE_RECONCILIATION_STATUSES,
+        )
+        if overlap:
+            raise OverlappingReconciliationError(
+                f"دوره انبارگردانی با سند تاییدشده {overlap.document_number} همپوشانی دارد."
+            )
+        prev_recon = _previous_closed_period(stored.product, stored.is_parent_pool, stored.period_start_date)
+        if prev_recon and prev_recon.actual_physical_closing_stock_kg != stored.opening_stock_kg:
+            raise OpeningStockMismatchError(
+                f"موجودی اول دوره با موجودی عینی پایان دوره قبل ({prev_recon.document_number}) مطابقت ندارد؛ محاسبه مجدد لازم است."
+            )
+        current_receipts, current_issues = _period_flows(
+            stored.product, stored.is_parent_pool, stored.period_start_date, stored.period_end_date
+        )
+        if current_receipts != stored.period_receipts_kg or current_issues != stored.period_issues_kg:
+            raise StaleReconciliationError(
+                "گردش‌های انبار این دوره پس از محاسبه تغییر کرده است؛ ابتدا انبارگردانی را مجدداً محاسبه کنید."
+            )
+
+        stored.status = ReconciliationStatus.APPROVED
+        stored.approved_by = user
+        stored.approved_at = timezone.now()
+        if idempotency_key:
+            stored.idempotency_key = idempotency_key
+        if notes:
+            stored.notes = (stored.notes + "\n" + notes).strip()
+
+        if apply_stock_adjustment and stored.discrepancy_kg and stored.discrepancy_kg != Decimal('0.000'):
+            existing_adjustment = stored.adjustment_movement or StockMovement.objects.filter(
+                movement_type=StockMovementType.ADJUSTMENT,
+                reference_document_number=stored.document_number,
+            ).first()
+            if existing_adjustment:
+                stored.adjustment_movement = existing_adjustment
+            else:
+                disc = stored.discrepancy_kg
                 if disc > Decimal('0.000'):
                     # Shortage: recorded expected > actual physical count -> reduce inventory
                     direction = StockMovementDirection.OUT
@@ -1594,23 +1752,23 @@ def approve_physical_reconciliation(
                 adj_weight = abs(disc)
                 user_name = getattr(user, 'get_full_name', lambda: '')() or user.username
 
-                adj_movement = StockMovement.objects.create(
-                    product=reconciliation.product,
-                    parent_product=reconciliation.product.get_parent() or reconciliation.product,
+                stored.adjustment_movement = StockMovement.objects.create(
+                    product=stored.product,
+                    parent_product=stored.product.get_parent() or stored.product,
                     direction=direction,
                     movement_type=StockMovementType.ADJUSTMENT,
                     net_weight_kg=adj_weight,
-                    reference_document_number=reconciliation.document_number,
-                    document_date=reconciliation.period_end_date,
+                    reference_document_number=stored.document_number,
+                    document_date=stored.period_end_date,
                     operator=user,
                     operator_name=user_name,
-                    remarks=f"تعدیل انبارگردانی {reconciliation.document_number} ({desc} به میزان {adj_weight} کیلوگرم)",
+                    remarks=f"تعدیل انبارگردانی {stored.document_number} ({desc} به میزان {adj_weight} کیلوگرم)",
                 )
-                reconciliation.adjustment_movement = adj_movement
 
-        reconciliation.save()
+        stored.save()
 
-    return reconciliation
+    reconciliation.refresh_from_db()
+    return stored
 
 
 def close_physical_reconciliation(
@@ -1619,19 +1777,26 @@ def close_physical_reconciliation(
 ) -> PhysicalInventoryReconciliation:
     """
     Closes an approved physical inventory reconciliation permanently.
+    Idempotent and decided on the stored status; closing creates no movements or new periods.
     """
     if not is_user_authorized_for_reconciliation(user):
         raise UnauthorizedReconciliationError("کاربر مجاز به بستن قطعی انبارگردانی نمی‌باشد.")
-
-    if reconciliation.status == ReconciliationStatus.CLOSED:
-        return reconciliation
-
-    if reconciliation.status != ReconciliationStatus.APPROVED:
+    if not reconciliation.pk:
         raise BusinessLogicError("فقط اسناد انبارگردانی تاییدشده قابل بستن قطعی می‌باشند.")
 
-    reconciliation.status = ReconciliationStatus.CLOSED
-    reconciliation.save()
-    return reconciliation
+    with transaction.atomic():
+        stored = PhysicalInventoryReconciliation.objects.select_for_update().get(pk=reconciliation.pk)
+        if stored.status == ReconciliationStatus.CLOSED:
+            reconciliation.refresh_from_db()
+            return stored
+        if stored.status != ReconciliationStatus.APPROVED:
+            raise BusinessLogicError("فقط اسناد انبارگردانی تاییدشده قابل بستن قطعی می‌باشند.")
+
+        stored.status = ReconciliationStatus.CLOSED
+        stored.save()
+
+    reconciliation.refresh_from_db()
+    return stored
 
 
 # ---------------------------------------------------------------------------

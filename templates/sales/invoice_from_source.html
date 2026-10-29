@@ -81,13 +81,13 @@
         <button type="button" class="tab-btn {% if active_tab != 'purchase' %}active{% endif %}" data-target="tab-sales">
             📤 فاکتور فروش (از حواله‌های خروج کالا)
             <span style="font-size: 0.75rem; background: #fee2e2; color: #991b1b; padding: 0.1rem 0.45rem; border-radius: 10px; margin-right: 0.35rem;">
-                {{ uninvoiced_issues.count }}
+                {{ uninvoiced_issues|length|fa_digits }}
             </span>
         </button>
         <button type="button" class="tab-btn {% if active_tab == 'purchase' %}active{% endif %}" data-target="tab-purchase">
             📥 فاکتور خرید (از رسیدهای ورود کالا)
             <span style="font-size: 0.75rem; background: #e0f2fe; color: #0369a1; padding: 0.1rem 0.45rem; border-radius: 10px; margin-right: 0.35rem;">
-                {{ uninvoiced_receipts.count }}
+                {{ uninvoiced_receipts|length|fa_digits }}
             </span>
         </button>
     </div>
@@ -135,10 +135,10 @@
                 </div>
 
                 {% for iss in uninvoiced_issues %}
-                <div class="source-card">
+                <div class="source-card{% if iss.is_selected or rec.is_selected %} selected{% endif %}">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem;">
                         <div style="display: flex; gap: 0.75rem; align-items: flex-start;">
-                            <input type="checkbox" name="selected_issues" value="{{ iss.id }}" id="iss-chk-{{ iss.id }}" style="margin-top: 0.35rem; width: 1.1rem; height: 1.1rem; cursor: pointer;">
+                            <input type="checkbox" name="selected_issues" value="{{ iss.id }}" id="iss-chk-{{ iss.id }}"{% if iss.is_selected %} checked{% endif %} style="margin-top: 0.35rem; width: 1.1rem; height: 1.1rem; cursor: pointer;">
                             <div>
                                 <label for="iss-chk-{{ iss.id }}" style="cursor: pointer; font-weight: 700; font-size: 1rem; color: #991b1b;" class="tabular-nums">
                                     {{ iss.document_number }}
@@ -159,7 +159,7 @@
                             </div>
                             <div style="font-size: 0.85rem; color: var(--text-muted);" class="tabular-nums">
                                 {% if iss.aggregate_total_amount %}
-                                    {{ iss.aggregate_total_amount|toman_display }}
+                                    {{ iss.aggregate_total_amount|rial }}
                                 {% else %}
                                     بدون ثبت قیمت در حواله
                                 {% endif %}
@@ -167,16 +167,23 @@
                         </div>
                     </div>
 
-                    <!-- Cut breakdown in this issue -->
-                    <div style="margin-top: 0.75rem; padding-top: 0.5rem; border-top: 1px dashed var(--border-subtle); font-size: 0.82rem; color: var(--text-muted);">
-                        {% if iss.items.exists %}
-                            <strong>اقلام موجود:</strong>
-                            {% for item in iss.items.all %}
-                                {{ item.product.name }} ({{ item.net_weight_kg|format_weight_kg }}){% if not forloop.last %} • {% endif %}
+                    <!-- Sale price per line: default shown with its source, always editable -->
+                    <div style="margin-top: 0.75rem; padding-top: 0.5rem; border-top: 1px dashed var(--border-subtle);">
+                        <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.35rem;">قیمت فروش هر ردیف (ریال) — قابل ویرایش:</div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.5rem 1rem;">
+                            {% for pl in iss.price_lines %}
+                            <div class="form-group price-line" style="margin-bottom: 0;" data-weight="{{ pl.weight|stringformat:'s' }}">
+                                <label class="form-label" style="font-size: 0.78rem; margin-bottom: 0.15rem;">
+                                    {{ pl.label }} ({{ pl.weight|format_weight_kg }} kg) <span style="color: var(--danger);">*</span>
+                                </label>
+                                <input type="number" name="{{ pl.key }}" value="{{ pl.value }}" class="form-input source-price-input" placeholder="ریال" min="1" step="1" dir="ltr" style="font-size: 0.85rem; font-weight: 600;">
+                                <span class="price-source" style="font-size: 0.72rem; display: block; margin-top: 2px; color: {% if pl.source_label %}var(--text-muted){% else %}#b91c1c{% endif %};">
+                                    {% if pl.source_label %}پیش‌فرض از: {{ pl.source_label }}{% else %}قیمت فروش ثبت نشده — لطفاً وارد کنید{% endif %}
+                                </span>
+                                <span class="price-preview" style="font-size: 0.72rem; color: var(--text-muted); display: block;"></span>
+                            </div>
                             {% endfor %}
-                        {% elif iss.product %}
-                            <strong>کالا:</strong> {{ iss.product.name }} ({{ iss.aggregate_net_weight|format_weight_kg }})
-                        {% endif %}
+                        </div>
                     </div>
                 </div>
                 {% empty %}
@@ -185,7 +192,7 @@
                 </div>
                 {% endfor %}
 
-                {% if uninvoiced_issues.exists %}
+                {% if uninvoiced_issues %}
                 <div style="display: flex; justify-content: flex-end; margin-top: 1.25rem;">
                     <button type="submit" class="btn btn-primary" style="padding: 0.6rem 1.75rem;">
                         ✓ صدور فاکتور فروش رسمی از حواله‌های انتخابی
@@ -235,14 +242,14 @@
                     </h2>
                 </div>
                 <div style="margin-bottom: 1rem; padding: 0.6rem 0.85rem; background: #fffbeb; border: 1px solid #fef3c7; border-radius: 6px; font-size: 0.82rem; color: #92400e;">
-                    💡 <strong>قانون حسابداری:</strong> در فرم رسید ورود، قیمت کالا ثبت نمی‌شود. هنگام صدور فاکتور خرید، ورود قیمت خرید به ریال برای هر رسید انتخابی <strong>الزامی</strong> است.
+                    💡 <strong>قانون حسابداری:</strong> قیمت خرید ثبت‌شده در رسید ورود (در صورت وجود) به‌عنوان پیش‌فرض نمایش داده می‌شود و قابل ویرایش است. برای هر ردیف رسید انتخابی، قیمت خرید معتبر به ریال <strong>الزامی</strong> است. قیمت خرید هرگز به‌عنوان قیمت فروش استفاده نمی‌شود.
                 </div>
 
                 {% for rec in uninvoiced_receipts %}
-                <div class="source-card">
+                <div class="source-card{% if iss.is_selected or rec.is_selected %} selected{% endif %}">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap;">
                         <div style="display: flex; gap: 0.75rem; align-items: flex-start;">
-                            <input type="checkbox" name="selected_receipts" value="{{ rec.id }}" id="rec-chk-{{ rec.id }}" style="margin-top: 0.35rem; width: 1.1rem; height: 1.1rem; cursor: pointer;">
+                            <input type="checkbox" name="selected_receipts" value="{{ rec.id }}" id="rec-chk-{{ rec.id }}"{% if rec.is_selected %} checked{% endif %} style="margin-top: 0.35rem; width: 1.1rem; height: 1.1rem; cursor: pointer;">
                             <div>
                                 <label for="rec-chk-{{ rec.id }}" style="cursor: pointer; font-weight: 700; font-size: 1rem; color: #1e3a8a;" class="tabular-nums">
                                     {{ rec.document_number }}
@@ -275,25 +282,18 @@
                                 <span>مجموع وزن خالص ورودی:</span>
                                 <strong class="tabular-nums" style="color: #15803d;">{{ rec.aggregate_net_weight|format_weight_kg }}</strong>
                             </div>
-                            {% if rec.items.exists %}
-                                {% for itm in rec.items.all %}
-                                <div class="form-group" style="margin-bottom: 0.35rem; border-top: 1px dashed var(--border-subtle); padding-top: 0.35rem;">
-                                    <label class="form-label" style="font-size: 0.78rem; margin-bottom: 0.15rem;">
-                                        قیمت خرید «{{ itm.product.name }}» به ریال: <span style="color: var(--danger);">*</span>
-                                    </label>
-                                    <input type="number" name="unit_price_rial_{{ itm.id }}" class="form-input purchase-price-input" placeholder="ریال" min="1" dir="ltr" style="font-size: 0.85rem; font-weight: 600;">
-                                    <span class="toman-calc" style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-top: 2px;"></span>
-                                </div>
-                                {% endfor %}
-                            {% else %}
-                                <div class="form-group" style="margin-bottom: 0.25rem;">
-                                    <label class="form-label" style="font-size: 0.8rem; margin-bottom: 0.2rem;">
-                                        قیمت خرید هر کیلو به ریال: <span style="color: var(--danger);">*</span>
-                                    </label>
-                                    <input type="number" name="unit_price_rial_{{ rec.id }}" class="form-input purchase-price-input" placeholder="ریال" min="1" dir="ltr" style="font-size: 0.9rem; font-weight: 600;">
-                                    <span class="toman-calc" style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-top: 2px;"></span>
-                                </div>
-                            {% endif %}
+                            {% for pl in rec.price_lines %}
+                            <div class="form-group price-line" style="margin-bottom: 0.35rem; border-top: 1px dashed var(--border-subtle); padding-top: 0.35rem;" data-weight="{{ pl.weight|stringformat:'s' }}">
+                                <label class="form-label" style="font-size: 0.78rem; margin-bottom: 0.15rem;">
+                                    قیمت خرید «{{ pl.label }}» به ریال: <span style="color: var(--danger);">*</span>
+                                </label>
+                                <input type="number" name="{{ pl.key }}" value="{{ pl.value }}" class="form-input source-price-input" placeholder="ریال" min="1" step="1" dir="ltr" style="font-size: 0.85rem; font-weight: 600;">
+                                <span class="price-source" style="font-size: 0.72rem; display: block; margin-top: 2px; color: {% if pl.source_label %}var(--text-muted){% else %}#b91c1c{% endif %};">
+                                    {% if pl.source_label %}پیش‌فرض از: {{ pl.source_label }}{% else %}قیمت خرید ثبت نشده — لطفاً وارد کنید{% endif %}
+                                </span>
+                                <span class="price-preview" style="font-size: 0.72rem; color: var(--text-muted); display: block;"></span>
+                            </div>
+                            {% endfor %}
                         </div>
                     </div>
                 </div>
@@ -303,7 +303,7 @@
                 </div>
                 {% endfor %}
 
-                {% if uninvoiced_receipts.exists %}
+                {% if uninvoiced_receipts %}
                 <div style="display: flex; justify-content: flex-end; margin-top: 1.25rem;">
                     <button type="submit" class="btn btn-primary" style="padding: 0.6rem 1.75rem;">
                         ✓ صدور فاکتور خرید رسمی از رسیدهای انتخابی
@@ -351,13 +351,45 @@
         });
     });
 
-    // Toman helper on purchase price inputs
-    document.querySelectorAll('.purchase-price-input').forEach(inp => {
-        inp.addEventListener('input', function() {
-            const val = parseInt(this.value) || 0;
-            const helper = this.parentElement.querySelector('.toman-calc');
-            if (helper) {
-                helper.textContent = val > 0 ? `${(val / 10).toLocaleString()} تومان` : '';
+    // Live line-total preview (same truncation as the server) and Toman input hint
+    function refreshPricePreview(inp) {
+        const line = inp.closest('.price-line');
+        const preview = line ? line.querySelector('.price-preview') : null;
+        if (!preview) return;
+        const price = /^\d+$/.test(inp.value.trim()) ? parseInt(inp.value, 10) : 0;
+        if (price > 0) {
+            const total = calcLineTotalRial(line.getAttribute('data-weight'), price);
+            preview.textContent = `جمع سطر: ${formatRial(total)} | ${formatTomanHint(price)}`;
+        } else {
+            preview.textContent = '';
+        }
+    }
+    document.querySelectorAll('.source-price-input').forEach(inp => {
+        inp.addEventListener('input', function() { refreshPricePreview(this); });
+        refreshPricePreview(inp);
+    });
+
+    // Frontend check before submit; the server validates again
+    document.querySelectorAll('#tab-sales form, #tab-purchase form').forEach(form => {
+        form.addEventListener('submit', function(e) {
+            const problems = [];
+            form.querySelectorAll('.source-card').forEach(card => {
+                const chk = card.querySelector('input[type="checkbox"]');
+                if (!chk || !chk.checked) return;
+                card.querySelectorAll('.source-price-input').forEach(inp => {
+                    const v = inp.value.trim();
+                    if (!/^\d+$/.test(v) || parseInt(v, 10) <= 0) {
+                        problems.push(inp);
+                        inp.style.borderColor = '#b91c1c';
+                    } else {
+                        inp.style.borderColor = '';
+                    }
+                });
+            });
+            if (problems.length) {
+                e.preventDefault();
+                alert('برای همه ردیف‌های اسناد انتخابی، قیمت واحد معتبر (عدد صحیح بزرگتر از صفر به ریال) وارد کنید.');
+                problems[0].focus();
             }
         });
     });

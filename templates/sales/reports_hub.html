@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load jalali_tags %}
 
 {% block title %}مرکز گزارش‌ها، تحلیل داده‌ها و آمار | فروشگاه گوشت و مرغ{% endblock %}
 
@@ -18,12 +19,12 @@
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
         <!-- Card 1: Total Sales -->
         <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem;">
-            <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.35rem;">مجموع فروش ثبتی (تومان)</div>
-            <div style="font-size: 1.5rem; font-weight: 800; color: #15803d;" class="tabular-nums">
-                {{ total_sales_toman|floatformat:0 }} تومان
+            <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.35rem;">مجموع فروش ثبتی</div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: #15803d;" class="tabular-nums" id="hub-total-sales">
+                {{ total_sales_rial|rial }}
             </div>
             <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
-                {{ total_sales_rial|floatformat:0 }} ریال در {{ total_invoices_count }} فاکتور
+                در {{ total_invoices_count|fa_digits }} فاکتور فروش
             </div>
         </div>
 

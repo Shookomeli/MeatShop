@@ -1,6 +1,5 @@
 from django.db import models
 from django.core.exceptions import ValidationError
-from django.conf import settings
 
 
 class Category(models.Model):
@@ -127,14 +126,11 @@ class Product(models.Model):
 
     @property
     def price_display(self):
-        """Formats the price in Toman or Rial based on settings without altering the stored Rial value."""
+        """Formats the stored Rial sale price for display without altering the stored value."""
         if self.price_per_unit_rial is None:
             return "تعیین نشده"
-        display_unit = getattr(settings, 'CURRENCY_DISPLAY_UNIT', 'TOMAN')
-        if display_unit == 'TOMAN':
-            toman_value = self.price_per_unit_rial // 10
-            return f"{toman_value:,} تومان"
-        return f"{self.price_per_unit_rial:,} ریال"
+        from sales.date_utils import format_rial
+        return format_rial(self.price_per_unit_rial)
 
     def clean(self):
         super().clean()

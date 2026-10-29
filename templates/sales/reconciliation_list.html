@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% load jalali_tags %}
+
+{% block title %}انبارگردانی و مغایرت‌گیری فیزیکی | واکا پروتئین{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
+        <div>
+            <h1 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main);">⚖️ انبارگردانی و مغایرت‌گیری فیزیکی</h1>
+            <p style="font-size: 0.85rem; color: var(--text-muted);">
+                موجودی مورد انتظار = اول دوره + ورودی‌ها − خروجی‌ها | مغایرت = موجودی مورد انتظار − موجودی عینی توزین‌شده (مثبت: کسری، منفی: مازاد)
+            </p>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+            <a href="{% url 'report_loss' %}" class="btn btn-secondary">📊 گزارش افت و بازدهی</a>
+            <a href="{% url 'reconciliation_create' %}" class="btn btn-primary">+ انبارگردانی جدید</a>
+        </div>
+    </div>
+
+    <form method="GET" style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap;">
+        <span style="font-size: 0.85rem; color: var(--text-muted);">وضعیت:</span>
+        <a href="{% url 'reconciliation_list' %}" class="btn btn-sm {% if not selected_status %}btn-primary{% else %}btn-secondary{% endif %}">همه</a>
+        {% for value, label in status_choices %}
+        <a href="?status={{ value }}" class="btn btn-sm {% if selected_status == value %}btn-primary{% else %}btn-secondary{% endif %}">{{ label }}</a>
+        {% endfor %}
+    </form>
+
+    <div class="table-responsive">
+        <table class="data-table" style="font-size: 0.85rem;">
+            <thead>
+                <tr>
+                    <th>شماره سند</th>
+                    <th>کالا / سهمیه</th>
+                    <th>دوره</th>
+                    <th>اول دوره (kg)</th>
+                    <th>ورودی (kg)</th>
+                    <th>خروجی (kg)</th>
+                    <th>مورد انتظار (kg)</th>
+                    <th>توزین فیزیکی (kg)</th>
+                    <th>مغایرت (kg)</th>
+                    <th>وضعیت</th>
+                    <th>تاریخ ایجاد</th>
+                    <th style="text-align: center;">عملیات</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for rec in reconciliations %}
+                <tr>
+                    <td class="tabular-nums" style="font-weight: 600;">{{ rec.document_number }}</td>
+                    <td>{{ rec.product.name }}{% if rec.is_parent_pool %} <small style="color: var(--primary);">(سهمیه والد)</small>{% endif %}</td>
+                    <td class="tabular-nums">{{ rec.period_start_date|jdate }} تا {{ rec.period_end_date|jdate }}</td>
+                    <td class="tabular-nums">{% if rec.opening_stock_kg is not None %}{{ rec.opening_stock_kg|format_weight_kg }}{% else %}—{% endif %}</td>
+                    <td class="tabular-nums" style="color: #1e3a8a;">{{ rec.period_receipts_kg|format_weight_kg }}</td>
+                    <td class="tabular-nums" style="color: #15803d;">{{ rec.period_issues_kg|format_weight_kg }}</td>
+                    <td class="tabular-nums" style="font-weight: 600;">{% if rec.expected_closing_stock_kg is not None %}{{ rec.expected_closing_stock_kg|format_weight_kg }}{% else %}—{% endif %}</td>
+                    <td class="tabular-nums" style="color: #4338ca; font-weight: 700;">{% if rec.actual_physical_closing_stock_kg is not None %}{{ rec.actual_physical_closing_stock_kg|format_weight_kg }}{% else %}<span style="color: #b91c1c;">توزین نشده</span>{% endif %}</td>
+                    <td class="tabular-nums">
+                        {% if rec.discrepancy_kg is not None %}
+                            {{ rec.discrepancy_kg|format_weight_kg }}
+                            <div style="font-size: 0.72rem; color: {% if rec.discrepancy_type == 'SHORTAGE' %}#b91c1c{% elif rec.discrepancy_type == 'SURPLUS' %}#15803d{% else %}#0f766e{% endif %};">{{ rec.discrepancy_type_display }}</div>
+                        {% else %}—{% endif %}
+                    </td>
+                    <td><span class="status-badge recon-status-{{ rec.status|lower }}">{{ rec.get_status_display }}</span></td>
+                    <td class="tabular-nums">{{ rec.created_at|jdate }}</td>
+                    <td style="text-align: center;">
+                        <a href="{% url 'reconciliation_detail' rec.pk %}" class="btn btn-secondary btn-sm">مشاهده / بررسی</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="12" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">
+                        هیچ سند انبارگردانی ثبت نشده است.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

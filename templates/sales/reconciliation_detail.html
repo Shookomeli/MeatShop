@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% load jalali_tags %}
+
+{% block title %}انبارگردانی {{ recon.document_number }} | واکا پروتئین{% endblock %}
+
+{% block content %}
+<div style="max-width: 960px; margin: 0 auto;">
+    <a href="{% url 'reconciliation_list' %}" style="color: var(--text-muted); font-size: 0.85rem; text-decoration: none;">← بازگشت به فهرست انبارگردانی</a>
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin: 0.35rem 0 1rem;">
+        <div>
+            <h1 style="font-size: 1.35rem; font-weight: 700; color: var(--text-main);">
+                ⚖️ سند انبارگردانی <span class="tabular-nums">{{ recon.document_number }}</span>
+                <span class="status-badge recon-status-{{ recon.status|lower }}" id="recon-status" style="font-size: 0.85rem; vertical-align: middle;">{{ recon.get_status_display }}</span>
+            </h1>
+            <p style="font-size: 0.88rem; color: var(--text-muted);">
+                {{ recon.product.name }}{% if recon.is_parent_pool %} (سهمیه والد){% endif %} — دوره
+                <span class="tabular-nums">{{ recon.period_start_date|jdate }}</span> تا <span class="tabular-nums">{{ recon.period_end_date|jdate }}</span>
+            </p>
+        </div>
+        <a href="{% url 'report_loss' %}?preset=all" class="btn btn-secondary btn-sm">📊 گزارش افت</a>
+    </div>
+
+    {% if form_errors.general %}
+    <div class="form-error" role="alert" style="padding: 0.6rem 0.85rem; background: #fee2e2; border: 1px solid #fca5a5; border-radius: 6px; margin-bottom: 1rem;">
+        {{ form_errors.general }}
+    </div>
+    {% endif %}
+
+    <!-- Stock figures, all produced by the reconciliation service -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.75rem; margin-bottom: 1rem;">
+        <div class="recon-figure"><div class="recon-figure-label">موجودی اول دوره</div>
+            <div class="recon-figure-val tabular-nums" id="fig-opening">{% if recon.opening_stock_kg is not None %}{{ recon.opening_stock_kg|format_weight_kg }} kg{% else %}—{% endif %}</div>
+            <div class="recon-figure-note">{% if previous_period %}از توزین سند {{ previous_period.document_number }}{% elif recon.opening_stock_kg is not None and recon.is_opening_verified %}ورود دستی تاییدشده{% elif recon.opening_stock_kg is not None %}تایید نشده{% else %}ثبت نشده{% endif %}</div>
+        </div>
+        <div class="recon-figure"><div class="recon-figure-label">+ ورودی دوره</div>
+            <div class="recon-figure-val tabular-nums" id="fig-in" style="color: #1e3a8a;">{{ recon.period_receipts_kg|format_weight_kg }} kg</div>
+            <div class="recon-figure-note">رسید و استحصال نهایی</div>
+        </div>
+        <div class="recon-figure"><div class="recon-figure-label">− خروجی دوره</div>
+            <div class="recon-figure-val tabular-nums" id="fig-out" style="color: #15803d;">{{ recon.period_issues_kg|format_weight_kg }} kg</div>
+            <div class="recon-figure-note">حواله و مصرف فرآوری</div>
+        </div>
+        <div class="recon-figure" style="border-top-color: #334155;"><div class="recon-figure-label">= موجودی مورد انتظار</div>
+            <div class="recon-figure-val tabular-nums" id="fig-expected">{% if recon.expected_closing_stock_kg is not None %}{{ recon.expected_closing_stock_kg|format_weight_kg }} kg{% else %}—{% endif %}</div>
+            <div class="recon-figure-note">طبق دفتر انبار</div>
+        </div>
+        <div class="recon-figure" style="border-top-color: #4338ca;"><div class="recon-figure-label">موجودی عینی توزین‌شده</div>
+            <div class="recon-figure-val tabular-nums" id="fig-actual" style="color: #4338ca;">{% if recon.actual_physical_closing_stock_kg is not None %}{{ recon.actual_physical_closing_stock_kg|format_weight_kg }} kg{% else %}<span style="color: #b91c1c;">توزین نشده</span>{% endif %}</div>
+            <div class="recon-figure-note">این مقدار موجودی انبار است، نه افت</div>
+        </div>
+        <div class="recon-figure" style="border-top-color: {% if recon.discrepancy_type == 'SHORTAGE' %}#b91c1c{% elif recon.discrepancy_type == 'SURPLUS' %}#15803d{% else %}#94a3b8{% endif %};"><div class="recon-figure-label">مغایرت</div>
+            <div class="recon-figure-val tabular-nums" id="fig-discrepancy">{% if recon.discrepancy_kg is not None %}{{ recon.discrepancy_kg|format_weight_kg }} kg{% else %}—{% endif %}</div>
+            <div class="recon-figure-note" id="fig-discrepancy-type">{{ recon.discrepancy_type_display }}{% if recon.discrepancy_percentage is not None %} ({{ recon.discrepancy_percentage|fa_digits }}٪){% endif %}</div>
+        </div>
+    </div>
+
+    {% if recon.discrepancy_type == 'SHORTAGE' and recon.status == 'CALCULATED' %}
+    <div style="padding: 0.6rem 0.85rem; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; font-size: 0.85rem; color: #92400e; margin-bottom: 1rem;">
+        کسری احتمالی — فقط پس از بررسی و تایید به‌عنوان افت قطعی ثبت می‌شود.
+    </div>
+    {% elif recon.discrepancy_type == 'SURPLUS' and recon.status == 'CALCULATED' %}
+    <div style="padding: 0.6rem 0.85rem; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; font-size: 0.85rem; color: #166534; margin-bottom: 1rem;">
+        مازاد انبار — موجودی توزین‌شده بیشتر از موجودی مورد انتظار است و نیازمند بررسی و تایید است.
+    </div>
+    {% endif %}
+
+    {% if is_editable %}
+    <!-- Physical count entry (recalculated by the service) -->
+    <form method="POST" action="{% url 'reconciliation_count' recon.pk %}" style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; margin-bottom: 1rem;">
+        {% csrf_token %}
+        <h2 style="font-size: 1rem; font-weight: 700; margin-bottom: 0.75rem;">ثبت / اصلاح موجودی توزین‌شده</h2>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
+            <div class="form-group">
+                <label class="form-label" for="count-actual">موجودی عینی توزین‌شده پایان دوره (kg)</label>
+                <input type="text" inputmode="decimal" name="actual_physical_closing_stock" id="count-actual" class="form-input" dir="ltr"
+                       value="{% if form_data %}{{ form_data.actual_physical_closing_stock|default:'' }}{% elif recon.actual_physical_closing_stock_kg is not None %}{{ recon.actual_physical_closing_stock_kg }}{% endif %}">
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">دقت ۰٫۰۰۱ کیلوگرم؛ عدد منفی پذیرفته نمی‌شود.</div>
+            </div>
+            {% if not previous_period %}
+            <div class="form-group">
+                <label class="form-label" for="count-opening">موجودی اول دوره (kg)</label>
+                <input type="text" inputmode="decimal" name="opening_stock" id="count-opening" class="form-input" dir="ltr"
+                       value="{% if form_data %}{{ form_data.opening_stock|default:'' }}{% elif recon.opening_stock_kg is not None %}{{ recon.opening_stock_kg }}{% endif %}">
+                <label style="font-size: 0.8rem; display: block; margin-top: 0.35rem;">
+                    <input type="checkbox" name="is_opening_verified" {% if form_data %}{% if form_data.is_opening_verified == 'on' %}checked{% endif %}{% elif recon.is_opening_verified %}checked{% endif %}>
+                    موجودی اول دوره تایید شده است
+                </label>
+            </div>
+            {% else %}
+            <div class="form-group" style="font-size: 0.85rem; color: var(--text-muted);">
+                موجودی اول دوره از توزین سند تاییدشده قبلی ({{ previous_period.document_number }}) خوانده می‌شود و قابل ویرایش نیست.
+            </div>
+            {% endif %}
+        </div>
+        <div class="form-group">
+            <label class="form-label" for="count-notes">یادداشت شمارش</label>
+            <textarea name="notes" id="count-notes" class="form-input" rows="2">{% if form_data %}{{ form_data.notes|default:'' }}{% else %}{{ recon.notes }}{% endif %}</textarea>
+        </div>
+        <div style="display: flex; justify-content: flex-end;">
+            <button type="submit" class="btn btn-primary">ثبت و محاسبه مجدد</button>
+        </div>
+    </form>
+    {% endif %}
+
+    {% if can_approve %}
+    <!-- Explicit approval; stock adjustment only on an explicit, confirmed choice -->
+    <form method="POST" action="{% url 'reconciliation_approve' recon.pk %}" style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; margin-bottom: 1rem;">
+        {% csrf_token %}
+        <h2 style="font-size: 1rem; font-weight: 700; margin-bottom: 0.5rem;">بررسی و تایید مغایرت</h2>
+        {% if recon.discrepancy_kg %}
+        <label style="display: block; font-size: 0.88rem; margin-bottom: 0.35rem;">
+            <input type="checkbox" name="apply_stock_adjustment" id="apply-adjustment">
+            ثبت گردش تعدیل در دفتر انبار ({% if recon.discrepancy_type == 'SHORTAGE' %}کسر{% else %}افزودن{% endif %} {{ recon.discrepancy_kg|format_weight_kg }} کیلوگرم)
+        </label>
+        <label style="display: block; font-size: 0.8rem; color: #92400e; margin-bottom: 0.75rem; padding-right: 1.5rem;">
+            <input type="checkbox" name="confirm_stock_adjustment">
+            آگاهم که ثبت تعدیل، موجودی دفتری انبار را تغییر می‌دهد و پس از تایید قابل بازگشت نیست.
+        </label>
+        <div style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+            بدون انتخاب گزینه بالا، فقط مغایرت تایید می‌شود و هیچ گردشی در دفتر انبار ثبت نمی‌شود.
+        </div>
+        {% endif %}
+        <div class="form-group">
+            <label class="form-label" for="approval-notes">یادداشت تایید</label>
+            <input type="text" name="approval_notes" id="approval-notes" class="form-input">
+        </div>
+        <div style="display: flex; justify-content: flex-end;">
+            <button type="submit" class="btn btn-success" onclick="return confirm('سند انبارگردانی تایید شود؟');">✓ تایید مغایرت</button>
+        </div>
+    </form>
+    {% elif recon.status == 'DRAFT' %}
+    <div style="padding: 0.6rem 0.85rem; background: #f1f5f9; border: 1px solid var(--border-color); border-radius: 6px; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+        سند ناقص است (موجودی توزین‌شده یا موجودی اول دوره تاییدشده ثبت نشده)؛ تایید و بستن آن ممکن نیست.
+    </div>
+    {% endif %}
+
+    {% if can_close %}
+    <form method="POST" action="{% url 'reconciliation_close' recon.pk %}" style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
+        {% csrf_token %}
+        <div style="font-size: 0.88rem;">بستن قطعی دوره: پس از بستن، سند به هیچ عنوان قابل تغییر نیست.</div>
+        <button type="submit" class="btn btn-danger" onclick="return confirm('سند به‌صورت قطعی بسته شود؟');">🔒 بستن قطعی</button>
+    </form>
+    {% endif %}
+
+    <!-- Audit trail -->
+    <div style="background: #f8fafc; border: 1px solid var(--border-subtle); border-radius: 8px; padding: 1rem 1.25rem; font-size: 0.85rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.5rem 1rem;">
+        <div><span style="color: var(--text-muted);">ایجاد:</span> {{ recon.created_at|jdatetime }}{% if recon.created_by %} — {{ recon.created_by.username }}{% endif %}</div>
+        <div><span style="color: var(--text-muted);">تایید:</span> {% if recon.approved_at %}{{ recon.approved_at|jdatetime }}{% if recon.approved_by %} — {{ recon.approved_by.username }}{% endif %}{% else %}—{% endif %}</div>
+        <div id="adjustment-info"><span style="color: var(--text-muted);">گردش تعدیل انبار:</span>
+            {% if adjustment %}{{ adjustment.get_direction_display }} {{ adjustment.net_weight_kg|format_weight_kg }} kg ({{ adjustment.reference_document_number }}){% else %}ثبت نشده{% endif %}
+        </div>
+        {% if recon.notes and not is_editable %}<div style="grid-column: 1 / -1;"><span style="color: var(--text-muted);">یادداشت‌ها:</span> {{ recon.notes|linebreaksbr }}</div>{% endif %}
+    </div>
+</div>
+
+<style>
+.recon-figure { background: var(--bg-surface); border: 1px solid var(--border-color); border-top: 4px solid #cbd5e1; border-radius: 8px; padding: 0.85rem; }
+.recon-figure-label { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem; }
+.recon-figure-val { font-size: 1.15rem; font-weight: 800; }
+.recon-figure-note { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.2rem; }
+</style>
+{% endblock %}

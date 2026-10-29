@@ -25,7 +25,7 @@
 SECRET_KEY=یک_کلید_محرمانه_طولانی_و_پیچیده
 DEBUG=False
 SCALE_MODE=mock
-CURRENCY_DISPLAY_UNIT=TOMAN
+CURRENCY_DISPLAY_UNIT=RIAL
 DATABASE_PATH=C:\MeatShop\data\db.sqlite3
 ```
 
