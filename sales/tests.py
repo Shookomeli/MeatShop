@@ -3582,3 +3582,98 @@ class Phase4DataSafetyPatchTestCase(TestCase):
         self.assertEqual(chicken_prods[0].id, self.parent_chicken.id)
         self.assertTrue(chicken_prods[0].is_parent)
 
+
+class Phase8InvoiceHistoryTestCase(TestCase):
+    def setUp(self):
+        from django.test import Client
+        self.client = Client()
+        self.cat = get_test_category("مرغ", "chicken")
+        self.product = Product.objects.create(
+            name="سینه شنسل",
+            code="101",
+            category=self.cat,
+            unit="kg",
+            price_per_unit_rial=2200000,
+        )
+
+    def test_invoice_list_renders_empty_safely(self):
+        from django.urls import reverse
+        Invoice.objects.all().delete()
+        res = self.client.get(reverse('invoice_list'))
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, "هنوز فاکتوری صادر نشده است")
+
+    def test_invoice_list_displays_persisted_invoices(self):
+        from django.urls import reverse
+        from sales.services import finalize_invoice
+
+        # Create invoice
+        inv = finalize_invoice(
+            document_number='INV-HIST-001',
+            goods_owner_name='مالک تستی',
+            buyer_name='خریدار تستی',
+            items_data=[{
+                'product': self.product,
+                'quantity': 1,
+                'net_weight_kg': Decimal('10.000'),
+                'unit_price_rial': 50000
+            }]
+        )
+
+        res = self.client.get(reverse('invoice_list'))
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, "INV-HIST-001")
+        self.assertContains(res, "خریدار تستی")
+        # Ensure viewing history doesn't create stock movements
+        self.assertEqual(StockMovement.objects.filter(reference_document_number='INV-HIST-001').count(), 0)
+
+    def test_invalid_invoice_id_returns_404(self):
+        from django.urls import reverse
+        res = self.client.get(reverse('invoice_detail', args=[99999]))
+        self.assertEqual(res.status_code, 404)
+
+    def test_historical_prices_are_preserved(self):
+        from django.urls import reverse
+        from sales.services import finalize_invoice
+
+        # Create invoice with a specific price
+        inv = finalize_invoice(
+            document_number='INV-HIST-002',
+            goods_owner_name='مالک تستی',
+            buyer_name='خریدار تستی',
+            items_data=[{
+                'product': self.product,
+                'quantity': 1,
+                'net_weight_kg': Decimal('5.000'),
+                'unit_price_rial': 2500000
+            }]
+        )
+
+        # Mutate current product price to simulate time passing
+        self.product.price_per_unit_rial = 9990000
+        self.product.save()
+
+        # Verify invoice detail retains the old historical price (2,500,000 Rial)
+        # Using Toman presentation (250,000 Toman)
+        res = self.client.get(reverse('invoice_detail', args=[inv.pk]))
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, "250,000 تومان")
+        self.assertNotContains(res, "999,000 تومان")
+
+    def test_export_csv_handles_invalid_dates_safely(self):
+        from django.urls import reverse
+        res = self.client.get(reverse('export_sales_csv') + '?start_date=invalid&end_date=1403/99/99')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res['Content-Type'], 'text/csv; charset=utf-8-sig')
+
+    def test_export_sales_csv_empty_dataset(self):
+        from django.urls import reverse
+        Invoice.objects.all().delete()
+        res = self.client.get(reverse('export_sales_csv'))
+        self.assertEqual(res.status_code, 200)
+        content = res.content.decode('utf-8')
+        # Should just be headers
+        self.assertIn('شماره فاکتور', content)
+        # Should be exactly 1 line (headers)
+        lines = [line for line in content.split('\r\n') if line.strip()]
+        self.assertEqual(len(lines), 1)

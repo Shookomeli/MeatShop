@@ -89,3 +89,48 @@ class MockScaleTestCase(TestCase):
             t.join()
 
         self.assertEqual(errors, [], f"Thread safety errors encountered: {errors}")
+
+class ScaleApiIntegrationTestCase(TestCase):
+    def setUp(self):
+        from django.test import Client
+        self.client = Client()
+
+    def test_scale_set_and_read_api(self):
+        from django.urls import reverse
+        import json
+        import time
+        from decimal import Decimal
+
+        # Reset scale to known state
+        reset_mock_scale(target_weight=Decimal('0.000'), settling_duration=0)
+
+        # Set weight
+        payload = {'weight': '15.670', 'settling_duration': 0}
+        res_set = self.client.post(reverse('scale_set_weight_api'), json.dumps(payload), content_type='application/json')
+        self.assertEqual(res_set.status_code, 200)
+        self.assertTrue(res_set.json()['success'])
+
+        # Read weight
+        res_read = self.client.get(reverse('scale_read_api'))
+        self.assertEqual(res_read.status_code, 200)
+        data = res_read.json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['weight_kg'], 15.670)
+        self.assertTrue(data['is_stable'])
+        self.assertTrue(data['is_connected'])
+
+    def test_scale_read_api_disconnected(self):
+        from django.urls import reverse
+
+        scale = reset_mock_scale(target_weight=Decimal('0.000'))
+        scale.disconnect()
+
+        res_read = self.client.get(reverse('scale_read_api'))
+        self.assertEqual(res_read.status_code, 503)
+        self.assertFalse(res_read.json()['success'])
+        self.assertIn('error', res_read.json())
+
+    def test_scale_factory_abstraction(self):
+        # Ensure get_scale returns MockScale without views depending directly on the class
+        scale = get_scale()
+        self.assertIsInstance(scale, MockScale)

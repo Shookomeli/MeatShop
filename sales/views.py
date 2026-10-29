@@ -128,7 +128,7 @@ def inventory_overview_view(request):
             Q(code__icontains=persian_q)
         )
 
-    products = products.order_by('category__display_order', 'category__id', '-is_parent', 'name')
+    products = products.order_by('category__display_order', 'category__id', '-is_parent', 'name', 'id')
 
     stock_items = []
     total_inventory_weight = Decimal('0.000')
@@ -957,7 +957,7 @@ def inventory_balance_report_view(request):
     if category_slug:
         products = products.filter(category__slug=category_slug)
 
-    products = products.order_by('category__display_order', 'category__id', '-is_parent', 'name')
+    products = products.order_by('category__display_order', 'category__id', '-is_parent', 'name', 'id')
 
     category_summary = {}
     rows = []
@@ -1157,7 +1157,7 @@ def export_sales_csv_view(request):
 
 def export_inventory_csv_view(request):
     """Exports current stock balances to CSV with UTF-8 BOM encoding for Excel."""
-    products = Product.objects.select_related('category').filter(is_active=True).order_by('category', 'name')
+    products = Product.objects.select_related('category').filter(is_active=True).order_by('category', 'name', 'id')
 
     response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
     response['Content-Disposition'] = 'attachment; filename="meatshop_inventory_export.csv"'
