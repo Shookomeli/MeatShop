@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_EVEN
 from django.db import transaction, IntegrityError
 from django.db.models import Sum, Q
 from django.utils import timezone
@@ -55,6 +55,30 @@ class InvalidTareWeightError(BusinessLogicError):
 class InsufficientStockError(BusinessLogicError):
     """Raised when an operation would drive inventory into negative numbers."""
     pass
+
+
+WEIGHT_QUANTUM = Decimal('0.001')
+
+
+def normalize_weight_kg(value) -> Decimal:
+    """
+    Normalizes an invoice weight to the 0.001 kg storage precision.
+    Uses ROUND_HALF_EVEN, the same rule Django's DecimalField applies when reading the
+    value back, so the persisted weight, the displayed weight and the line total all agree.
+    """
+    try:
+        return Decimal(str(value)).quantize(WEIGHT_QUANTUM, rounding=ROUND_HALF_EVEN)
+    except (InvalidOperation, ValueError, TypeError):
+        raise BusinessLogicError(f"وزن واردشده نامعتبر است: {value}")
+
+
+def calculate_line_total_rial(amount: Decimal, unit_price_rial: int) -> int:
+    """
+    Authoritative invoice line total in whole Rial: amount (kg or count) × unit price.
+    Fractional Rial are truncated (ROUND_DOWN), identical to the historical int() behaviour.
+    """
+    total = Decimal(str(amount)) * Decimal(int(unit_price_rial))
+    return int(total.to_integral_value(rounding=ROUND_DOWN))
 
 
 def calculate_tare_and_net(gross_weight_kg: Decimal, tare_entries: list) -> dict:
@@ -305,7 +329,7 @@ def finalize_goods_receipt(
             u_price = int(u_price)
             if u_price < 0:
                 raise BusinessLogicError(f"قیمت واحد کالای «{prod.name}» نمی‌تواند منفی باشد.")
-            line_total = int(Decimal(str(net)) * Decimal(u_price))
+            line_total = calculate_line_total_rial(net, u_price)
 
         parsed_items.append({
             'product': prod,
@@ -492,7 +516,7 @@ def finalize_goods_issue(
             u_price = int(u_price)
             if u_price < 0:
                 raise BusinessLogicError(f"قیمت واحد کالای «{prod.name}» نمی‌تواند منفی باشد.")
-            line_total = int(Decimal(str(net)) * Decimal(u_price))
+            line_total = calculate_line_total_rial(net, u_price)
 
         parsed_items.append({
             'product': prod,
@@ -720,8 +744,17 @@ def finalize_invoice(
     total_rial = 0
     for item in items_data:
         product = item['product']
-        net_weight = Decimal(str(item.get('net_weight_kg', '1.000')))
-        qty = int(item.get('quantity', 1))
+        if not product.is_active:
+            raise BusinessLogicError(f"کالای «{product.name}» غیرفعال است و قابل فروش نیست.")
+        net_weight = normalize_weight_kg(item.get('net_weight_kg', '1.000'))
+        try:
+            qty = int(item.get('quantity', 1))
+        except (TypeError, ValueError):
+            raise BusinessLogicError(f"تعداد کالای «{product.name}» نامعتبر است.")
+        if qty < 1:
+            raise BusinessLogicError(f"تعداد کالای «{product.name}» باید حداقل ۱ باشد.")
+        if net_weight < Decimal('0.000') or (product.unit == 'kg' and net_weight == Decimal('0.000')):
+            raise BusinessLogicError(f"وزن خالص کالای «{product.name}» باید بزرگتر از صفر باشد.")
         raw_price = item.get('unit_price_rial')
         if raw_price is None or raw_price == '':
             raw_price = getattr(product, 'price_per_unit_rial', None) or 0
@@ -730,9 +763,9 @@ def finalize_invoice(
             raise BusinessLogicError(f"قیمت معتبر به ریال برای کالای «{product.name}» تعیین نشده است.")
 
         if product.unit == 'kg':
-            line_total = int(net_weight * Decimal(price_rial))
+            line_total = calculate_line_total_rial(net_weight, price_rial)
         else:
-            line_total = int(Decimal(qty) * Decimal(price_rial))
+            line_total = calculate_line_total_rial(Decimal(qty), price_rial)
 
         InvoiceItem.objects.create(
             invoice=invoice,
@@ -853,7 +886,7 @@ def generate_invoice_from_source_documents(
                         )
                     price = int(price)
                     net_wt = item.net_weight_kg
-                    line_total = int(Decimal(str(net_wt)) * Decimal(price))
+                    line_total = calculate_line_total_rial(net_wt, price)
                     InvoiceItem.objects.create(
                         invoice=invoice,
                         product=item.product,
@@ -879,7 +912,7 @@ def generate_invoice_from_source_documents(
                     )
                 price = int(price)
                 net_wt = iss.aggregate_net_weight
-                line_total = int(Decimal(str(net_wt)) * Decimal(price))
+                line_total = calculate_line_total_rial(net_wt, price)
                 InvoiceItem.objects.create(
                     invoice=invoice,
                     product=iss.product,
@@ -948,7 +981,7 @@ def generate_invoice_from_source_documents(
                     price = int(price)
                     net_wt = item.net_weight_kg
                     qty = item.package_count or 1
-                    line_total = int(Decimal(str(net_wt)) * Decimal(price))
+                    line_total = calculate_line_total_rial(net_wt, price)
                     InvoiceItem.objects.create(
                         invoice=invoice,
                         product=item.product,
@@ -975,7 +1008,7 @@ def generate_invoice_from_source_documents(
                 price = int(price)
                 net_wt = rec.aggregate_net_weight
                 qty = rec.package_count or 1
-                line_total = int(Decimal(str(net_wt)) * Decimal(price))
+                line_total = calculate_line_total_rial(net_wt, price)
                 InvoiceItem.objects.create(
                     invoice=invoice,
                     product=rec.product,
@@ -1013,7 +1046,13 @@ def cancel_invoice(invoice: Invoice, operator=None, cancellation_reason: str = "
     - Sets invoice status to CANCELLED.
     - Appends cancellation details to remarks.
     Does NOT delete the invoice record, ensuring full financial traceability.
+    Repeated cancellation is a no-op: an already-cancelled invoice is returned unchanged.
     """
+    # Re-read the persisted state so a stale object or a retried request cannot cancel twice
+    invoice.refresh_from_db()
+    if invoice.status == DocumentStatus.CANCELLED:
+        return invoice
+
     invoice.source_issues.update(invoice=None)
     invoice.source_receipts.update(invoice=None)
     invoice.status = DocumentStatus.CANCELLED
@@ -1135,6 +1174,10 @@ def calculate_inventory_loss(parent_product: Product = None, start_date=None, en
     Yield % = (outgoing cuts / incoming parent) * 100
     Loss % = (loss / incoming parent) * 100
     Includes child cut breakdown of outgoing products and current stock.
+
+    This is a theoretical, movement-based metric. Reconciliation ADJUSTMENT movements are
+    excluded from the period flows so that approved physical loss (reported separately by
+    calculate_confirmed_physical_loss) is never counted a second time here.
     """
     if parent_product and not parent_product.is_parent:
         parent_product = parent_product.get_parent() or parent_product
@@ -1154,11 +1197,11 @@ def calculate_inventory_loss(parent_product: Product = None, start_date=None, en
         qs_in = StockMovement.objects.filter(
             Q(parent_product=parent) | Q(product=parent, parent_product__isnull=True),
             direction=StockMovementDirection.IN
-        )
+        ).exclude(movement_type=StockMovementType.ADJUSTMENT)
         qs_out = StockMovement.objects.filter(
             Q(parent_product=parent) | Q(product=parent, parent_product__isnull=True),
             direction=StockMovementDirection.OUT
-        )
+        ).exclude(movement_type=StockMovementType.ADJUSTMENT)
 
         if start_date:
             qs_in = qs_in.filter(document_date__gte=start_date)
@@ -1236,6 +1279,63 @@ def calculate_inventory_loss(parent_product: Product = None, start_date=None, en
         res_dict['yield_pct'] = Decimal('0.00')
         res_dict['cuts_breakdown'] = []
     return res_dict
+
+
+AUTHORITATIVE_RECONCILIATION_STATUSES = [ReconciliationStatus.APPROVED, ReconciliationStatus.CLOSED]
+
+
+def calculate_confirmed_physical_loss(parent_product: Product = None, start_date=None, end_date=None) -> dict:
+    """
+    Confirmed physical loss from authoritative physical inventory reconciliations.
+
+    - Authoritative = APPROVED or CLOSED (CLOSED is reachable only from APPROVED) and complete
+      (verified opening stock, physical count and discrepancy present).
+    - discrepancy_kg = expected - actual: positive is a shortage (confirmed loss), negative a surplus.
+    - Confirmed loss sums positive discrepancies only; surpluses and exact matches add nothing.
+    - Filters: reconciliation period fully inside [start_date, end_date]; product filter covers the
+      parent pool and its child cuts, which are separate stock pools and never overlap.
+    - Summary and records come from the same complete (unsliced) queryset.
+    """
+    qs = PhysicalInventoryReconciliation.objects.select_related('product', 'approved_by', 'created_by')
+    if parent_product:
+        qs = qs.filter(Q(product=parent_product) | Q(product__parent=parent_product))
+    if start_date:
+        qs = qs.filter(period_start_date__gte=start_date)
+    if end_date:
+        qs = qs.filter(period_end_date__lte=end_date)
+
+    authoritative = Q(
+        status__in=AUTHORITATIVE_RECONCILIATION_STATUSES,
+        opening_stock_kg__isnull=False,
+        is_opening_verified=True,
+        actual_physical_closing_stock_kg__isnull=False,
+        discrepancy_kg__isnull=False,
+    )
+    confirmed_records = list(qs.filter(authoritative))
+    excluded_records = list(qs.exclude(authoritative))
+
+    shortage_kg = Decimal('0.000')
+    surplus_kg = Decimal('0.000')
+    shortage_count = surplus_count = match_count = 0
+    for rec in confirmed_records:
+        if rec.discrepancy_kg > Decimal('0.000'):
+            shortage_kg += rec.discrepancy_kg
+            shortage_count += 1
+        elif rec.discrepancy_kg < Decimal('0.000'):
+            surplus_kg += -rec.discrepancy_kg
+            surplus_count += 1
+        else:
+            match_count += 1
+
+    return {
+        'confirmed_records': confirmed_records,
+        'excluded_records': excluded_records,
+        'confirmed_loss_kg': shortage_kg,
+        'confirmed_surplus_kg': surplus_kg,
+        'shortage_count': shortage_count,
+        'surplus_count': surplus_count,
+        'match_count': match_count,
+    }
 
 
 def is_user_authorized_for_reconciliation(user) -> bool:

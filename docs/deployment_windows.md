@@ -70,4 +70,14 @@ DATABASE_PATH=C:\MeatShop\data\db.sqlite3
 ```cmd
 python manage.py restore_database "C:\MeatShop\backups\meatshop_backup_YYYYMMDD_HHMMSS.sqlite3"
 ```
-این دستور پیش از هر اقدامی، سلامت فایل پشتیبان را با `PRAGMA integrity_check` اعتبارسنجی نموده و سپس آن را بازگردانی می‌کند.
+این دستور پیش از هر تغییری در پایگاه داده مقصد، موارد زیر را بررسی می‌کند و در صورت هر خطا، پایگاه داده فعلی دست‌نخورده باقی می‌ماند:
+- یکسان نبودن مسیر فایل پشتیبان و پایگاه داده مقصد؛
+- سلامت فایل با `PRAGMA integrity_check`؛
+- وجود جداول اصلی این نرم‌افزار (کالاها، فاکتورها، دفتر گردش انبار و `django_migrations`)؛
+- عدم وجود مهاجرت‌های ناشناخته (فایل پشتیبان ساخته‌شده با نسخه جدیدتر نرم‌افزار پذیرفته نمی‌شود).
+
+برای آزمایش بازیابی بدون دست زدن به پایگاه داده اصلی، از گزینه `--target-db` با یک مسیر آزمایشی استفاده کنید:
+```cmd
+python manage.py restore_database "C:\MeatShop\backups\meatshop_backup_YYYYMMDD_HHMMSS.sqlite3" --target-db "C:\MeatShop\restore_test\db.sqlite3"
+```
+پس از بازیابی یک نسخه پشتیبان قدیمی‌تر، دستور `python manage.py migrate` را اجرا کنید.

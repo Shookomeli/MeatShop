@@ -15,7 +15,7 @@
             </h1>
         </div>
         <div>
-            <a href="{% url 'export_sales_csv' %}?start_date={{ start_date }}&end_date={{ end_date }}" class="btn btn-secondary">
+            <a href="{% url 'export_sales_csv' %}?{{ request.GET.urlencode }}" class="btn btn-secondary">
                 📥 دانلود فایل اکسل (CSV)
             </a>
         </div>

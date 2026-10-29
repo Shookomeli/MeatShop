@@ -883,7 +883,7 @@ class Phase9ReportingAndAnalyticsTestCase(TestCase):
         from django.urls import reverse
         res = self.client.get(reverse('export_sales_csv'))
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res['Content-Type'], 'text/csv; charset=utf-8-sig')
+        self.assertEqual(res['Content-Type'], 'text/csv; charset=utf-8')
         content = res.content.decode('utf-8')
         self.assertIn('شماره فاکتور', content)
         self.assertIn('INV-REP-01', content)
@@ -893,10 +893,111 @@ class Phase9ReportingAndAnalyticsTestCase(TestCase):
         from django.urls import reverse
         res = self.client.get(reverse('export_inventory_csv'))
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res['Content-Type'], 'text/csv; charset=utf-8-sig')
+        self.assertEqual(res['Content-Type'], 'text/csv; charset=utf-8')
         content = res.content.decode('utf-8')
         self.assertIn('ردیف', content)
         self.assertIn('فیله مرغ', content)
+
+    def _assert_single_leading_bom(self, res):
+        bom = b'\xef\xbb\xbf'
+        self.assertTrue(res.content.startswith(bom))
+        self.assertEqual(res.content.count(bom), 1)
+
+    def test_csv_exports_contain_exactly_one_leading_bom(self):
+        from django.urls import reverse
+        for name in ('export_sales_csv', 'export_inventory_csv'):
+            res = self.client.get(reverse(name))
+            self.assertEqual(res.status_code, 200)
+            self._assert_single_leading_bom(res)
+            # Every data row is clean Persian UTF-8 without stray BOM characters
+            rows = res.content.decode('utf-8-sig').splitlines()
+            self.assertGreaterEqual(len(rows), 2)
+            for row in rows:
+                self.assertNotIn('﻿', row)
+        sales_text = self.client.get(reverse('export_sales_csv')).content.decode('utf-8-sig')
+        self.assertTrue(sales_text.startswith('شماره فاکتور'))
+        self.assertIn('رستوران نمونه', sales_text)
+
+    def _create_purchase_invoice(self):
+        return finalize_invoice(
+            document_number="INV-PUR-01",
+            goods_owner_name="فروشگاه مرکزی",
+            buyer_name="تامین‌کننده نمونه",
+            invoice_type=InvoiceType.PURCHASE,
+            items_data=[{
+                'product': self.prod1,
+                'net_weight_kg': Decimal("100.000"),
+                'quantity': 1,
+                'unit_price_rial': 1000000,
+            }],
+        )
+
+    def test_purchase_invoices_excluded_from_sales_reports(self):
+        from django.urls import reverse
+        self._create_purchase_invoice()
+
+        hub = self.client.get(reverse('reports_hub'))
+        self.assertEqual(hub.context['total_sales_rial'], 70000000)
+        self.assertEqual(hub.context['total_invoices_count'], 1)
+
+        report = self.client.get(reverse('report_sales'))
+        self.assertEqual(report.context['total_revenue_rial'], 70000000)
+        self.assertEqual(report.context['total_sold_weight_kg'], Decimal("30.000"))
+        self.assertEqual(report.context['invoice_count'], 1)
+
+        csv_text = self.client.get(reverse('export_sales_csv')).content.decode('utf-8-sig')
+        self.assertNotIn('INV-PUR-01', csv_text)
+
+    def _csv_totals(self, query):
+        import csv
+        import io
+        from django.urls import reverse
+        res = self.client.get(reverse('export_sales_csv') + query)
+        self._assert_single_leading_bom(res)
+        rows = list(csv.reader(io.StringIO(res.content.decode('utf-8-sig'))))[1:]
+        weight = sum((Decimal(r[7]) for r in rows), Decimal('0.000'))
+        rial = sum(int(r[10]) for r in rows)
+        return len(rows), weight, rial
+
+    def test_sales_csv_matches_on_screen_report_for_same_filters(self):
+        from urllib.parse import urlencode
+        from django.urls import reverse
+        self._create_purchase_invoice()
+        other_cat = get_test_category("گوسفندی", "lamb")
+        lamb = Product.objects.create(name="ران گوسفندی", category=other_cat, unit="kg")
+        finalize_invoice(
+            document_number="INV-REP-02",
+            goods_owner_name="فروشگاه مرکزی",
+            buyer_name="مشتری دیگر",
+            document_date=date(2020, 1, 15),
+            items_data=[{'product': lamb, 'net_weight_kg': Decimal("3.500"), 'quantity': 1, 'unit_price_rial': 4000000}],
+        )
+
+        # (query params, expected CSV rows, expected kg, expected Rial); the purchase invoice never appears
+        cases = [
+            ({}, 3, Decimal("33.500"), 84000000),
+            ({'buyer': 'نمونه'}, 2, Decimal("30.000"), 70000000),
+            ({'buyer': 'ناموجود'}, 0, Decimal("0.000"), 0),
+            ({'category': 'chicken'}, 2, Decimal("30.000"), 70000000),
+            ({'category': 'lamb'}, 1, Decimal("3.500"), 14000000),
+            ({'product': str(self.prod2.id)}, 1, Decimal("10.000"), 20000000),
+            ({'start_date': '2020-01-01', 'end_date': '2020-01-31'}, 1, Decimal("3.500"), 14000000),
+            ({'start_date': 'not-a-date'}, 3, Decimal("33.500"), 84000000),
+            ({'product': 'abc'}, 0, Decimal("0.000"), 0),
+        ]
+        for params, exp_rows, exp_kg, exp_rial in cases:
+            query = '?' + urlencode(params) if params else ''
+            with self.subTest(params=params):
+                report = self.client.get(reverse('report_sales') + query)
+                self.assertEqual(report.status_code, 200)
+                self.assertEqual(report.context['total_revenue_rial'], exp_rial)
+                self.assertEqual(report.context['total_sold_weight_kg'], exp_kg)
+                self.assertEqual(self._csv_totals(query), (exp_rows, exp_kg, exp_rial))
+
+    def test_sales_report_export_link_carries_all_filters(self):
+        from django.urls import reverse
+        res = self.client.get(reverse('report_sales') + '?buyer=x&category=chicken&product=5&start_date=2020-01-01')
+        self.assertContains(res, 'buyer=x&amp;category=chicken&amp;product=5&amp;start_date=2020-01-01')
 
 
 class Phase10BackupAndDeploymentTestCase(TestCase):
@@ -953,9 +1054,118 @@ class Phase10BackupAndDeploymentTestCase(TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             corrupt_file = Path(temp_dir) / "corrupt.sqlite3"
             corrupt_file.write_bytes(b"THIS IS CORRUPT GARBAGE DATA AND NOT SQLITE")
+            target = Path(temp_dir) / "target.sqlite3"
+            target.write_bytes(b"EXISTING TARGET CONTENT")
 
             with self.assertRaises(CommandError):
-                call_command('restore_database', str(corrupt_file), no_input=True)
+                call_command('restore_database', str(corrupt_file), target_db=str(target), no_input=True)
+
+            # Destination untouched and no SQLite handle left open on the rejected file
+            self.assertEqual(target.read_bytes(), b"EXISTING TARGET CONTENT")
+            corrupt_file.unlink()
+            self.assertFalse(corrupt_file.exists())
+
+    def _make_valid_backup(self, temp_dir):
+        from pathlib import Path
+        from django.core.management import call_command
+        backup_dir = Path(temp_dir) / "backups"
+        call_command('backup_database', output_dir=str(backup_dir))
+        return list(backup_dir.glob("*.sqlite3"))[0]
+
+    def _make_target(self, temp_dir):
+        """Creates an existing destination database with known content."""
+        import sqlite3
+        from contextlib import closing
+        from pathlib import Path
+        target = Path(temp_dir) / "existing_target.sqlite3"
+        with closing(sqlite3.connect(str(target))) as conn:
+            conn.execute("CREATE TABLE marker (v TEXT)")
+            conn.execute("INSERT INTO marker VALUES ('original')")
+            conn.commit()
+        return target, target.read_bytes()
+
+    def test_restore_rejects_valid_sqlite_that_is_not_meatshop_database(self):
+        import tempfile
+        import sqlite3
+        from contextlib import closing
+        from pathlib import Path
+        from django.core.management import call_command, CommandError
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            foreign = Path(temp_dir) / "foreign.sqlite3"
+            with closing(sqlite3.connect(str(foreign))) as conn:
+                conn.execute("CREATE TABLE something_else (id INTEGER)")
+                conn.commit()
+            empty = Path(temp_dir) / "empty.sqlite3"
+            with closing(sqlite3.connect(str(empty))) as conn:
+                conn.execute("VACUUM")
+            target, original_bytes = self._make_target(temp_dir)
+
+            for candidate in (foreign, empty):
+                with self.assertRaises(CommandError):
+                    call_command('restore_database', str(candidate), target_db=str(target), no_input=True)
+                self.assertEqual(target.read_bytes(), original_bytes)
+                candidate.unlink()
+
+    def test_restore_rejects_backup_with_unknown_newer_migrations(self):
+        import tempfile
+        import sqlite3
+        from contextlib import closing
+        from django.core.management import call_command, CommandError
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            backup_file = self._make_valid_backup(temp_dir)
+            with closing(sqlite3.connect(str(backup_file))) as conn:
+                conn.execute(
+                    "INSERT INTO django_migrations (app, name, applied) VALUES ('sales', '9999_from_future', '2030-01-01')"
+                )
+                conn.commit()
+            target, original_bytes = self._make_target(temp_dir)
+
+            with self.assertRaisesMessage(CommandError, "sales.9999_from_future"):
+                call_command('restore_database', str(backup_file), target_db=str(target), no_input=True)
+            self.assertEqual(target.read_bytes(), original_bytes)
+
+    def test_restore_rejects_identical_source_and_destination(self):
+        import tempfile
+        from django.core.management import call_command, CommandError
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            backup_file = self._make_valid_backup(temp_dir)
+            original_bytes = backup_file.read_bytes()
+            with self.assertRaises(CommandError):
+                call_command('restore_database', str(backup_file), target_db=str(backup_file), no_input=True)
+            self.assertEqual(backup_file.read_bytes(), original_bytes)
+
+    def test_restore_rejects_missing_backup_without_creating_target(self):
+        import tempfile
+        from pathlib import Path
+        from django.core.management import call_command, CommandError
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "not_created.sqlite3"
+            with self.assertRaises(CommandError):
+                call_command('restore_database', str(Path(temp_dir) / "missing.sqlite3"), target_db=str(target), no_input=True)
+            self.assertFalse(target.exists())
+
+    def test_restore_valid_backup_replaces_existing_target_and_releases_files(self):
+        import tempfile
+        import sqlite3
+        from contextlib import closing
+        from django.core.management import call_command
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            backup_file = self._make_valid_backup(temp_dir)
+            target, _ = self._make_target(temp_dir)
+            call_command('restore_database', str(backup_file), target_db=str(target), no_input=True)
+
+            with closing(sqlite3.connect(str(target))) as conn:
+                tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self.assertIn('sales_invoice', tables)
+            self.assertNotIn('marker', tables)
+            # All handles released: both files can be removed
+            backup_file.unlink()
+            target.unlink()
 
     def test_django_system_and_deployment_check(self):
         from django.core.management import call_command
@@ -3664,7 +3874,7 @@ class Phase8InvoiceHistoryTestCase(TestCase):
         from django.urls import reverse
         res = self.client.get(reverse('export_sales_csv') + '?start_date=invalid&end_date=1403/99/99')
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res['Content-Type'], 'text/csv; charset=utf-8-sig')
+        self.assertEqual(res['Content-Type'], 'text/csv; charset=utf-8')
 
     def test_export_sales_csv_empty_dataset(self):
         from django.urls import reverse
@@ -3677,3 +3887,291 @@ class Phase8InvoiceHistoryTestCase(TestCase):
         # Should be exactly 1 line (headers)
         lines = [line for line in content.split('\r\n') if line.strip()]
         self.assertEqual(len(lines), 1)
+
+
+class InvoiceCalculationIntegrityTestCase(TestCase):
+    """Authoritative invoice line calculation, weight normalization, validation and idempotent cancel."""
+
+    def setUp(self):
+        self.cat = get_test_category("مرغ", "chicken")
+        self.product = Product.objects.create(name="فیله مرغ", category=self.cat, unit="kg", price_per_unit_rial=2500000)
+        self.piece_product = Product.objects.create(name="برگر بسته‌ای", category=self.cat, unit="piece")
+
+    def _invoice(self, doc, weight, price=1000003, qty=1, product=None):
+        return finalize_invoice(
+            document_number=doc,
+            goods_owner_name="فروشگاه",
+            buyer_name="مشتری",
+            items_data=[{'product': product or self.product, 'net_weight_kg': weight, 'quantity': qty, 'unit_price_rial': price}],
+        )
+
+    def _raw_weight(self, item):
+        from django.db import connection
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT net_weight_kg FROM sales_invoiceitem WHERE id = %s", [item.id])
+            return cursor.fetchone()[0]
+
+    def test_line_total_helper_matches_legacy_truncation_for_valid_inputs(self):
+        from sales.services import calculate_line_total_rial, normalize_weight_kg
+        weights = ["0.001", "0.009", "0.999", "1.000", "1.005", "2.345", "33.333", "999.999", "999999.999"]
+        prices = [1, 9, 10, 11, 99999, 123457, 2500000, 9999999, 10**12 + 7]
+        for w in weights:
+            for p in prices:
+                with self.subTest(weight=w, price=p):
+                    weight = Decimal(w)
+                    # Normalization is the identity for weights already at 0.001 precision
+                    self.assertEqual(normalize_weight_kg(weight), weight)
+                    self.assertEqual(calculate_line_total_rial(weight, p), int(weight * Decimal(p)))
+        # Count-based lines (non-kg units)
+        for q in [1, 7, 250000]:
+            self.assertEqual(calculate_line_total_rial(Decimal(q), 123457), q * 123457)
+
+    def test_line_total_truncates_fractional_rial(self):
+        from sales.services import calculate_line_total_rial
+        self.assertEqual(calculate_line_total_rial(Decimal("0.001"), 999), 0)      # 0.999 Rial
+        self.assertEqual(calculate_line_total_rial(Decimal("0.001"), 1999), 1)     # 1.999 Rial
+        self.assertEqual(calculate_line_total_rial(Decimal("1.005"), 10), 10)      # 10.05 Rial
+
+    def test_three_decimal_weights_store_and_total_unchanged(self):
+        inv = self._invoice("INV-C-01", Decimal("2.345"), price=2500000)
+        item = inv.items.get()
+        self.assertEqual(item.net_weight_kg, Decimal("2.345"))
+        self.assertEqual(item.total_price_rial, int(Decimal("2.345") * 2500000))
+        self.assertEqual(inv.total_amount_rial, item.total_price_rial)
+
+    def test_weight_beyond_three_decimals_normalized_before_persistence_and_total(self):
+        # ROUND_HALF_EVEN matches Django's DecimalField read-back of previously stored values
+        cases = [("1.2345", "1.234"), ("1.2355", "1.236"), ("2.9999", "3.000"), ("1.0005", "1.000")]
+        for i, (given, expected) in enumerate(cases):
+            with self.subTest(weight=given):
+                inv = self._invoice(f"INV-C-N{i}", Decimal(given))
+                item = inv.items.get()
+                item.refresh_from_db()
+                self.assertEqual(item.net_weight_kg, Decimal(expected))
+                self.assertEqual(Decimal(str(self._raw_weight(item))), Decimal(expected))
+                self.assertEqual(item.total_price_rial, int(Decimal(expected) * 1000003))
+                self.assertEqual(inv.total_amount_rial, item.total_price_rial)
+
+    def test_invalid_lines_rejected_without_creating_invoice(self):
+        inactive = Product.objects.create(name="کالای غیرفعال", category=self.cat, unit="kg", is_active=False)
+        bad_cases = [
+            dict(weight=Decimal("0.000")),
+            dict(weight=Decimal("0.0004")),   # normalizes to 0.000
+            dict(weight=Decimal("-1.000")),
+            dict(weight="abc"),
+            dict(weight=Decimal("1.000"), qty=0),
+            dict(weight=Decimal("1.000"), qty=-2),
+            dict(weight=Decimal("1.000"), product=inactive),
+            dict(weight=Decimal("-1.000"), product=self.piece_product),
+        ]
+        for i, case in enumerate(bad_cases):
+            with self.subTest(case=case):
+                with self.assertRaises(BusinessLogicError):
+                    self._invoice(f"INV-BAD-{i}", case['weight'], qty=case.get('qty', 1), product=case.get('product'))
+        self.assertEqual(Invoice.objects.count(), 0)
+        self.assertEqual(InvoiceItem.objects.count(), 0)
+
+    def test_piece_unit_line_uses_quantity(self):
+        inv = self._invoice("INV-C-P", Decimal("1.000"), price=150000, qty=4, product=self.piece_product)
+        self.assertEqual(inv.total_amount_rial, 600000)
+
+    def test_direct_invoice_remains_stock_neutral(self):
+        before = StockMovement.objects.count()
+        self._invoice("INV-C-S", Decimal("5.000"))
+        self.assertEqual(StockMovement.objects.count(), before)
+
+    def test_existing_invoice_values_not_rewritten(self):
+        # Simulates a historical row stored before normalization (raw 4-decimal weight)
+        legacy = Invoice.objects.create(
+            document_number="INV-OLD", goods_owner_name="o", buyer_name="b",
+            total_amount_rial=1234503, status=DocumentStatus.FINALIZED,
+        )
+        legacy_item = InvoiceItem.objects.create(
+            invoice=legacy, product=self.product, product_name_snapshot="فیله مرغ",
+            net_weight_kg=Decimal("1.2345"), unit_price_rial=1000003, total_price_rial=1234503,
+        )
+        self._invoice("INV-C-NEW", Decimal("1.2345"))
+        legacy.refresh_from_db()
+        self.assertEqual(legacy.total_amount_rial, 1234503)
+        self.assertEqual(self._raw_weight(legacy_item), 1.2345)
+        self.assertEqual(InvoiceItem.objects.get(pk=legacy_item.pk).total_price_rial, 1234503)
+
+    def test_invoice_form_rejects_zero_weight_line(self):
+        import json
+        res = self.client.post(reverse('invoice_create'), {
+            'buyer_name': 'مشتری',
+            'items_json': json.dumps([{'product_id': self.product.id, 'net_weight_kg': '0', 'quantity': 1, 'unit_price_rial': 1000}]),
+        })
+        self.assertEqual(res.status_code, 200)
+        self.assertIn('general', res.context['form_errors'])
+        self.assertEqual(Invoice.objects.count(), 0)
+
+    def test_repeated_cancellation_is_idempotent(self):
+        tare = TareType.objects.create(name="سبد", tare_weight_grams=2000, is_custom=False)
+        finalize_goods_receipt(
+            document_number="REC-CAN-01", supplier_name="تامین", product=self.product,
+            gross_weight_kg=Decimal("52.000"), tare_entries=[{'tare_type': tare, 'quantity': 1}],
+        )
+        issue = finalize_goods_issue(
+            document_number="ISS-CAN-01", goods_owner_name="فروشگاه", recipient_name="مشتری",
+            product=self.product, gross_weight_kg=Decimal("22.000"),
+            tare_entries=[{'tare_type': tare, 'quantity': 1}], unit_price_rial=3500000,
+        )
+        invoice = generate_invoice_from_source_documents(source_type='SALE', document_ids=[issue.id])
+        movements_before = StockMovement.objects.count()
+
+        cancel_invoice(invoice, cancellation_reason="اول")
+        invoice.refresh_from_db()
+        first_state = (invoice.status, invoice.remarks, invoice.total_amount_rial)
+        issue.refresh_from_db()
+        self.assertIsNone(issue.invoice)
+
+        # A retried request holding a stale object must not change anything
+        stale = Invoice.objects.get(pk=invoice.pk)
+        stale.status = DocumentStatus.FINALIZED
+        cancel_invoice(stale, cancellation_reason="دوم")
+        cancel_invoice(invoice, cancellation_reason="سوم")
+        invoice.refresh_from_db()
+        self.assertEqual((invoice.status, invoice.remarks, invoice.total_amount_rial), first_state)
+        self.assertNotIn("دوم", invoice.remarks)
+        self.assertNotIn("سوم", invoice.remarks)
+        self.assertEqual(StockMovement.objects.count(), movements_before)
+        self.assertEqual(invoice.items.count(), 1)
+
+
+class ConfirmedPhysicalLossReportTestCase(TestCase):
+    """Confirmed physical loss is derived only from authoritative reconciliations and kept separate from movement-based metrics."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        self.cat_a = get_test_category("مرغ", "chicken")
+        self.cat_b = get_test_category("گوسفندی", "lamb")
+        self.parent_a = Product.objects.create(name="مرغ کامل", category=self.cat_a, is_parent=True, unit="kg")
+        self.child_a = Product.objects.create(name="فیله مرغ", category=self.cat_a, parent=self.parent_a, unit="kg")
+        self.parent_b = Product.objects.create(name="لاشه گوسفندی", category=self.cat_b, is_parent=True, unit="kg")
+        self.admin = User.objects.create_user(username="loss_admin", password="x", is_staff=True)
+
+    def _recon(self, product, start, end, opening, actual, approve=True, adjust=False, close=False):
+        from sales.services import (
+            calculate_physical_reconciliation, approve_physical_reconciliation, close_physical_reconciliation,
+        )
+        recon = calculate_physical_reconciliation(
+            product=product, start_date=start, end_date=end,
+            opening_stock=Decimal(opening), is_opening_verified=True,
+            actual_physical_closing_stock=Decimal(actual) if actual is not None else None,
+            save_record=True,
+        )
+        if approve:
+            recon = approve_physical_reconciliation(recon, user=self.admin, apply_stock_adjustment=adjust)
+        if close:
+            recon = close_physical_reconciliation(recon, user=self.admin)
+        return recon
+
+    def _loss(self, **kwargs):
+        from sales.services import calculate_confirmed_physical_loss
+        return calculate_confirmed_physical_loss(**kwargs)
+
+    def test_only_positive_shortage_counts_as_confirmed_loss(self):
+        oct1, oct7 = date(2026, 10, 1), date(2026, 10, 7)
+        self._recon(self.parent_a, oct1, oct7, "500.000", "480.000")                 # shortage 20
+        self._recon(self.child_a, oct1, oct7, "100.000", "95.500", close=True)       # shortage 4.5, CLOSED
+        self._recon(self.parent_b, oct1, oct7, "200.000", "210.000")                 # surplus 10
+        self._recon(self.parent_b, oct1, oct7, "50.000", "50.000")                   # exact match
+        res = self._loss()
+        self.assertEqual(res['confirmed_loss_kg'], Decimal("24.500"))
+        self.assertEqual(res['confirmed_surplus_kg'], Decimal("10.000"))
+        self.assertEqual((res['shortage_count'], res['surplus_count'], res['match_count']), (2, 1, 1))
+        self.assertEqual(len(res['confirmed_records']), 4)
+
+    def test_draft_calculated_and_incomplete_records_are_excluded(self):
+        from sales.models import PhysicalInventoryReconciliation, ReconciliationStatus
+        oct1, oct7 = date(2026, 10, 1), date(2026, 10, 7)
+        draft = self._recon(self.parent_a, oct1, oct7, "500.000", None, approve=False)
+        calculated = self._recon(self.parent_a, oct1, oct7, "500.000", "400.000", approve=False)
+        self.assertEqual(draft.status, ReconciliationStatus.DRAFT)
+        self.assertEqual(calculated.status, ReconciliationStatus.CALCULATED)
+        # An APPROVED record that is incomplete (e.g. status set outside the approval workflow)
+        incomplete = PhysicalInventoryReconciliation.objects.create(
+            document_number="STK-INCOMPLETE", product=self.parent_a, period_start_date=oct1, period_end_date=oct7,
+            opening_stock_kg=Decimal("100.000"), is_opening_verified=False,
+            actual_physical_closing_stock_kg=Decimal("50.000"), discrepancy_kg=Decimal("50.000"),
+            status=ReconciliationStatus.APPROVED,
+        )
+        res = self._loss()
+        self.assertEqual(res['confirmed_loss_kg'], Decimal("0.000"))
+        self.assertEqual(res['confirmed_records'], [])
+        self.assertEqual({r.pk for r in res['excluded_records']}, {draft.pk, calculated.pk, incomplete.pk})
+
+    def test_date_and_product_filters_apply_to_summary_and_records(self):
+        self._recon(self.parent_a, date(2026, 10, 1), date(2026, 10, 7), "500.000", "480.000")   # 20
+        self._recon(self.child_a, date(2026, 10, 1), date(2026, 10, 7), "100.000", "97.000")     # 3
+        self._recon(self.parent_a, date(2026, 11, 1), date(2026, 11, 7), "480.000", "470.000")   # 10
+        self._recon(self.parent_b, date(2026, 10, 1), date(2026, 10, 7), "300.000", "290.000")   # 10
+
+        october = self._loss(start_date=date(2026, 10, 1), end_date=date(2026, 10, 31))
+        self.assertEqual(october['confirmed_loss_kg'], Decimal("33.000"))
+        self.assertEqual(len(october['confirmed_records']), 3)
+
+        pool_a = self._loss(parent_product=self.parent_a)
+        self.assertEqual(pool_a['confirmed_loss_kg'], Decimal("33.000"))
+        self.assertEqual({r.product_id for r in pool_a['confirmed_records']}, {self.parent_a.id, self.child_a.id})
+
+        both = self._loss(parent_product=self.parent_a, start_date=date(2026, 11, 1), end_date=date(2026, 11, 30))
+        self.assertEqual(both['confirmed_loss_kg'], Decimal("10.000"))
+        self.assertEqual(len(both['confirmed_records']), 1)
+
+        # A period that only partially overlaps the range is not included
+        partial = self._loss(start_date=date(2026, 10, 3), end_date=date(2026, 10, 31))
+        self.assertEqual(partial['confirmed_records'], [])
+
+    def test_adjustment_movement_not_double_counted(self):
+        from sales.services import calculate_inventory_loss, get_parent_stock_balance
+        finalize_goods_receipt(
+            document_number="REC-LOSS-01", supplier_name="تامین", product=self.parent_a,
+            gross_weight_kg=Decimal("500.000"), tare_entries=[], document_date=date(2026, 10, 1),
+        )
+        movement_before = calculate_inventory_loss(self.parent_a, date(2026, 10, 1), date(2026, 10, 7))
+        stock_before = get_parent_stock_balance(self.parent_a)
+
+        self._recon(self.parent_a, date(2026, 10, 1), date(2026, 10, 7), "0.000", "480.000", adjust=True)  # 20 short
+        movement_after = calculate_inventory_loss(self.parent_a, date(2026, 10, 1), date(2026, 10, 7))
+
+        # Movement-based metric ignores the adjustment; the ledger itself still reflects it
+        self.assertEqual(movement_after['overall_loss_kg'], movement_before['overall_loss_kg'])
+        self.assertEqual(movement_after['overall_outgoing_kg'], movement_before['overall_outgoing_kg'])
+        self.assertEqual(get_parent_stock_balance(self.parent_a), stock_before - Decimal("20.000"))
+        self.assertEqual(self._loss()['confirmed_loss_kg'], Decimal("20.000"))
+
+        # The following period does not pick the adjustment up as new loss
+        nxt = self._recon(self.parent_a, date(2026, 10, 8), date(2026, 10, 14), "480.000", "480.000", approve=False)
+        self.assertEqual(nxt.opening_stock_kg, Decimal("480.000"))
+        self.assertEqual(nxt.period_issues_kg, Decimal("0.000"))
+        self.assertEqual(nxt.discrepancy_kg, Decimal("0.000"))
+
+    def test_empty_dataset(self):
+        res = self._loss()
+        self.assertEqual(res['confirmed_loss_kg'], Decimal("0.000"))
+        self.assertEqual(res['confirmed_surplus_kg'], Decimal("0.000"))
+        self.assertEqual(res['confirmed_records'], [])
+        response = self.client.get(reverse('report_loss') + '?preset=all')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['physical_loss']['confirmed_loss_kg'], Decimal("0.000"))
+
+    def test_report_view_summary_matches_displayed_records_without_truncation(self):
+        for i in range(30):
+            self._recon(self.parent_a, date(2026, 10, 1), date(2026, 10, 7), "100.000", "99.000")  # 1 kg each
+        self._recon(self.parent_b, date(2026, 10, 1), date(2026, 10, 7), "100.000", "105.000")     # surplus
+        self._recon(self.parent_a, date(2026, 10, 1), date(2026, 10, 7), "100.000", None, approve=False)
+
+        response = self.client.get(
+            reverse('report_loss') + f'?preset=custom&start_date=2026-10-01&end_date=2026-10-31&parent_id={self.parent_a.id}'
+        )
+        self.assertEqual(response.status_code, 200)
+        displayed = response.context['reconciliations']
+        self.assertEqual(len(displayed), 30)
+        summary = response.context['physical_loss']['confirmed_loss_kg']
+        self.assertEqual(summary, Decimal("30.000"))
+        self.assertEqual(summary, sum((r.discrepancy_kg for r in displayed if r.discrepancy_kg > 0), Decimal("0.000")))
+        self.assertEqual(len(response.context['excluded_reconciliations']), 1)
+        self.assertContains(response, "کسری فیزیکی تاییدشده")
+        self.assertContains(response, "تراز تئوریک مبتنی بر گردش انبار")

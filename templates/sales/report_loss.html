@@ -68,7 +68,13 @@
         </form>
     </div>
 
-    <!-- Overall KPI Metrics Grid -->
+    <!-- Overall KPI Metrics Grid: theoretical movement-based metric (not confirmed physical loss) -->
+    <h2 style="font-size: 1.05rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.25rem;">
+        📊 تراز تئوریک مبتنی بر گردش انبار
+    </h2>
+    <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+        محاسبه از روی ورودی‌ها و خروجی‌های ثبت‌شده؛ اسناد تعدیل انبارگردانی در این بخش لحاظ نمی‌شوند. کسری فیزیکی قطعی در بخش انبارگردانی پایین صفحه گزارش می‌شود.
+    </p>
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
         <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.15rem; border-top: 4px solid #1e3a8a;">
             <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem;">مجموع لاشه و گوشت ورودی</div>
@@ -212,6 +218,27 @@
             </div>
         </div>
 
+        <!-- Confirmed physical loss summary: same filtered records as the table below -->
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+            فقط اسناد کامل در وضعیت «تایید و تصویب‌شده» یا «بسته‌شده / قطعی» محاسبه می‌شوند. کسری فیزیکی تاییدشده فقط مجموع مغایرت‌های مثبت (کسری) است؛ مازاد و تراز کامل جزو افت نیستند.
+        </p>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
+            <div style="border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; border-top: 4px solid #b91c1c;">
+                <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem;">کسری فیزیکی تاییدشده</div>
+                <div style="font-size: 1.35rem; font-weight: 800; color: #b91c1c;" class="tabular-nums" id="confirmed-loss-kg">
+                    {{ physical_loss.confirmed_loss_kg|format_weight_kg }}
+                </div>
+                <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.2rem;">{{ physical_loss.shortage_count }} سند کسری</div>
+            </div>
+            <div style="border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; border-top: 4px solid #15803d;">
+                <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem;">مازاد فیزیکی تاییدشده</div>
+                <div style="font-size: 1.35rem; font-weight: 800; color: #15803d;" class="tabular-nums">
+                    {{ physical_loss.confirmed_surplus_kg|format_weight_kg }}
+                </div>
+                <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.2rem;">{{ physical_loss.surplus_count }} سند مازاد، {{ physical_loss.match_count }} سند تراز</div>
+            </div>
+        </div>
+
         {% if reconciliations %}
         <div class="table-responsive">
             <table class="data-table" style="font-size: 0.82rem;">
@@ -267,7 +294,20 @@
         </div>
         {% else %}
         <div style="padding: 1.5rem; text-align: center; color: var(--text-muted); font-size: 0.85rem; background: #f8fafc; border-radius: 6px;">
-            هیچ سند انبارگردانی فیزیکی ثبت‌شده‌ای برای این محدوده یافت نشد.
+            هیچ سند انبارگردانی تاییدشده‌ای برای این محدوده یافت نشد.
+        </div>
+        {% endif %}
+
+        {% if excluded_reconciliations %}
+        <div style="margin-top: 1rem;">
+            <h3 style="font-size: 0.9rem; font-weight: 700; color: var(--text-muted); margin-bottom: 0.5rem;">
+                اسناد پیش‌نویس، محاسبه‌شده یا ناقص (در کسری فیزیکی تاییدشده محاسبه نمی‌شوند)
+            </h3>
+            <ul style="font-size: 0.8rem; color: var(--text-muted); margin: 0; padding-inline-start: 1.25rem;">
+                {% for rec in excluded_reconciliations %}
+                <li class="tabular-nums">{{ rec.document_number }} — {{ rec.product.name }} — {{ rec.period_start_date|jdate }} تا {{ rec.period_end_date|jdate }} — {{ rec.get_status_display }}</li>
+                {% endfor %}
+            </ul>
         </div>
         {% endif %}
     </div>

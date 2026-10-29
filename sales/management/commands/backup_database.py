@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from django.core.management.base import BaseCommand, CommandError
@@ -39,26 +40,19 @@ class Command(BaseCommand):
 
         try:
             connection.ensure_connection()
-            dest_conn = sqlite3.connect(str(target_backup_path))
-
-            # Use SQLite Online Backup API for hot, non-locking, crash-consistent snapshot
-            with dest_conn:
+            # Use SQLite Online Backup API for hot, non-locking, crash-consistent snapshot.
+            # closing() guarantees every handle is released even if the backup fails.
+            with closing(sqlite3.connect(str(target_backup_path))) as dest_conn:
                 if hasattr(connection, 'connection') and connection.connection:
                     connection.connection.backup(dest_conn, pages=100)
                 else:
                     source_db_path = Path(db_config['NAME']).resolve()
-                    source_conn = sqlite3.connect(str(source_db_path))
-                    source_conn.backup(dest_conn, pages=100)
-                    source_conn.close()
-
-            dest_conn.close()
+                    with closing(sqlite3.connect(str(source_db_path))) as source_conn:
+                        source_conn.backup(dest_conn, pages=100)
 
             # Verify integrity of the backup file
-            verify_conn = sqlite3.connect(str(target_backup_path))
-            cursor = verify_conn.cursor()
-            cursor.execute("PRAGMA integrity_check;")
-            integrity_result = cursor.fetchone()[0]
-            verify_conn.close()
+            with closing(sqlite3.connect(str(target_backup_path))) as verify_conn:
+                integrity_result = verify_conn.execute("PRAGMA integrity_check;").fetchone()[0]
 
             if integrity_result != "ok":
                 if target_backup_path.exists():

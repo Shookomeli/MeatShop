@@ -39,6 +39,7 @@ from .services import (
     generate_invoice_from_source_documents,
     cancel_invoice,
     calculate_inventory_loss,
+    calculate_confirmed_physical_loss,
     calculate_physical_reconciliation,
     approve_physical_reconciliation,
     close_physical_reconciliation,
@@ -849,11 +850,12 @@ def invoice_cancel_view(request, pk):
 
 def reports_hub_view(request):
     """Central reporting overview dashboard with KPI metric cards and quick links."""
-    total_sales_rial = Invoice.objects.filter(status=DocumentStatus.FINALIZED).aggregate(
+    sales_invoices = Invoice.objects.filter(status=DocumentStatus.FINALIZED, invoice_type=InvoiceType.SALE)
+    total_sales_rial = sales_invoices.aggregate(
         total=Sum('total_amount_rial')
     )['total'] or 0
 
-    total_invoices_count = Invoice.objects.filter(status=DocumentStatus.FINALIZED).count()
+    total_invoices_count = sales_invoices.count()
     total_receipts_count = GoodsReceipt.objects.count()
     total_issues_count = GoodsIssue.objects.count()
 
@@ -874,15 +876,19 @@ def reports_hub_view(request):
     return render(request, 'sales/reports_hub.html', context)
 
 
-def sales_summary_report_view(request):
-    """Sales analysis filtered by date range, customer, category, and cut."""
-    start_date_str = request.GET.get('start_date', '').strip()
-    end_date_str = request.GET.get('end_date', '').strip()
-    buyer = request.GET.get('buyer', '').strip()
-    category_slug = request.GET.get('category', '').strip()
-    product_id = request.GET.get('product', '').strip()
+def _filter_sales_report_data(params):
+    """
+    Single source of the sales-report filters, shared by the on-screen report and the CSV export.
+    Only finalized SALE invoices count as sales; purchase invoices are excluded.
+    Returns (invoices, items_qs, filter_values).
+    """
+    start_date_str = params.get('start_date', '').strip()
+    end_date_str = params.get('end_date', '').strip()
+    buyer = params.get('buyer', '').strip()
+    category_slug = params.get('category', '').strip()
+    product_id = params.get('product', '').strip()
 
-    invoices = Invoice.objects.filter(status=DocumentStatus.FINALIZED).prefetch_related('items__product__category')
+    invoices = Invoice.objects.filter(status=DocumentStatus.FINALIZED, invoice_type=InvoiceType.SALE)
 
     if start_date_str:
         try:
@@ -909,7 +915,25 @@ def sales_summary_report_view(request):
     if category_slug:
         items_qs = items_qs.filter(product__category__slug=category_slug)
     if product_id:
-        items_qs = items_qs.filter(product_id=product_id)
+        try:
+            items_qs = items_qs.filter(product_id=int(product_id))
+        except ValueError:
+            items_qs = items_qs.none()
+
+    filter_values = {
+        'start_date': start_date_str,
+        'end_date': end_date_str,
+        'buyer': buyer,
+        'category': category_slug,
+        'product': product_id,
+    }
+    return invoices, items_qs, filter_values
+
+
+def sales_summary_report_view(request):
+    """Sales analysis filtered by date range, customer, category, and cut."""
+    invoices, items_qs, filters = _filter_sales_report_data(request.GET)
+    invoices = invoices.prefetch_related('items__product__category')
 
     total_revenue_rial = items_qs.aggregate(total=Sum('total_price_rial'))['total'] or 0
     total_sold_weight_kg = items_qs.aggregate(total=Sum('net_weight_kg'))['total'] or Decimal('0.000')
@@ -932,11 +956,11 @@ def sales_summary_report_view(request):
     )
 
     context = {
-        'start_date': start_date_str,
-        'end_date': end_date_str,
-        'buyer': buyer,
-        'selected_category': category_slug,
-        'selected_product': product_id,
+        'start_date': filters['start_date'],
+        'end_date': filters['end_date'],
+        'buyer': filters['buyer'],
+        'selected_category': filters['category'],
+        'selected_product': filters['product'],
         'categories': categories,
         'products': products,
         'total_revenue_rial': total_revenue_rial,
@@ -1043,17 +1067,10 @@ def inventory_loss_report_view(request):
             pass
 
     parent_products = Product.objects.filter(is_parent=True, is_active=True).select_related('category').order_by('category__display_order', 'id')
+    # Theoretical, movement-based balance (excludes reconciliation adjustments)
     loss_data = calculate_inventory_loss(parent_product=parent_product, start_date=start_date, end_date=end_date)
-
-    reconciliations = PhysicalInventoryReconciliation.objects.all().select_related('product', 'approved_by', 'created_by')
-    if parent_product:
-        reconciliations = reconciliations.filter(
-            Q(product=parent_product) | Q(product__parent=parent_product)
-        )
-    if start_date:
-        reconciliations = reconciliations.filter(period_start_date__gte=start_date)
-    if end_date:
-        reconciliations = reconciliations.filter(period_end_date__lte=end_date)
+    # Confirmed physical loss: summary and displayed records from the same filtered dataset
+    physical_loss = calculate_confirmed_physical_loss(parent_product=parent_product, start_date=start_date, end_date=end_date)
 
     context = {
         'loss_data': loss_data,
@@ -1062,7 +1079,9 @@ def inventory_loss_report_view(request):
         'preset': preset,
         'start_date_str': start_date_str or (to_jalali_date(start_date, persian_digits=False) if start_date else ''),
         'end_date_str': end_date_str or (to_jalali_date(end_date, persian_digits=False) if end_date else ''),
-        'reconciliations': reconciliations[:25],
+        'physical_loss': physical_loss,
+        'reconciliations': physical_loss['confirmed_records'],
+        'excluded_reconciliations': physical_loss['excluded_records'],
     }
     return render(request, 'sales/report_loss.html', context)
 
@@ -1093,31 +1112,13 @@ def tare_analysis_report_view(request):
 
 def export_sales_csv_view(request):
     """Exports sales line items to CSV with Persian UTF-8 BOM encoding for Microsoft Excel."""
-    start_date_str = request.GET.get('start_date', '').strip()
-    end_date_str = request.GET.get('end_date', '').strip()
+    _, items_qs, _ = _filter_sales_report_data(request.GET)
+    items = items_qs.select_related('invoice').order_by('-invoice__date', '-invoice__id', 'id')
 
-    invoices = Invoice.objects.filter(status=DocumentStatus.FINALIZED)
-    if start_date_str:
-        try:
-            start_date = parse_jalali_or_gregorian_date(start_date_str)
-            if start_date:
-                invoices = invoices.filter(date__gte=start_date)
-        except ValueError:
-            pass
-    if end_date_str:
-        try:
-            end_date = parse_jalali_or_gregorian_date(end_date_str)
-            if end_date:
-                invoices = invoices.filter(date__lte=end_date)
-        except ValueError:
-            pass
-
-    invoice_ids = invoices.values_list('id', flat=True)
-    items = InvoiceItem.objects.filter(invoice_id__in=invoice_ids).select_related('invoice', 'product__category').order_by('-invoice__date', '-invoice__id')
-
-    response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
+    # charset must be plain utf-8: 'utf-8-sig' would prepend a BOM to every write()
+    response = HttpResponse(content_type='text/csv; charset=utf-8')
     response['Content-Disposition'] = 'attachment; filename="meatshop_sales_export.csv"'
-    # Write UTF-8 BOM so Excel opens Persian text without corrupting encoding
+    # Write UTF-8 BOM once so Excel opens Persian text without corrupting encoding
     response.write('\ufeff')
 
     writer = csv.writer(response)
@@ -1159,8 +1160,9 @@ def export_inventory_csv_view(request):
     """Exports current stock balances to CSV with UTF-8 BOM encoding for Excel."""
     products = Product.objects.select_related('category').filter(is_active=True).order_by('category', 'name', 'id')
 
-    response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
+    response = HttpResponse(content_type='text/csv; charset=utf-8')
     response['Content-Disposition'] = 'attachment; filename="meatshop_inventory_export.csv"'
+    # Write UTF-8 BOM once so Excel opens Persian text without corrupting encoding
     response.write('\ufeff')
 
     writer = csv.writer(response)

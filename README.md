@@ -52,6 +52,16 @@ Environment settings are configured via `.env` (derived from `.env.example`).
 - **Conversion Rule**: `1 Toman = 10 Rial`.
 - **Presentation Layer**: When `CURRENCY_DISPLAY_UNIT=TOMAN`, values are displayed in Toman (`amount_rial // 10`) with Persian formatting. When `CURRENCY_DISPLAY_UNIT=RIAL`, values are displayed in Rial.
 - **No Floating-Point Financials**: Avoid binary float calculations; use integer Rial or `Decimal` throughout calculation pipelines.
+- **Invoice Line Calculation** (`sales.services.calculate_line_total_rial`): `line_total_rial = weight_kg × unit_price_rial` (or `quantity × unit_price_rial` for non-kg units), truncated to whole Rial (`ROUND_DOWN`). `Invoice.total_amount_rial` is the sum of its line totals.
+- **Weight Precision** (`sales.services.normalize_weight_kg`): invoice weights are normalized to 0.001 kg with `ROUND_HALF_EVEN` (the same rule Django uses when reading a stored `DecimalField`) before being saved and before the line total is computed, so the stored weight and the line total always agree. Weights already at 0.001 precision are unchanged; inputs with more than three decimals are rounded first.
+
+### Stock Movement Rule
+Stock changes only through goods receipts, goods issues, processing records and approved reconciliation adjustments. Invoices are financial documents and never create stock movements, including invoices created directly on the invoice form.
+
+### Loss Reporting
+The loss report shows two separate metrics:
+- **Theoretical movement balance**: incoming minus outgoing movements for the period, excluding reconciliation `ADJUSTMENT` movements.
+- **Confirmed physical loss**: the sum of positive discrepancies (shortages) from complete reconciliations with status `APPROVED` or `CLOSED`. Surpluses, exact matches, drafts and calculated-but-unapproved records are not counted.
 
 ---
 
@@ -76,8 +86,10 @@ python manage.py check
 # 3. Apply migrations
 python manage.py migrate
 
-# 4. Run test suite
+# 4. Run test suite (uses an isolated in-memory test database)
 pytest
+# or: python manage.py test
+# On Windows, set PYTHONUTF8=1 first so Persian command output never fails on a non-UTF-8 console
 
 # 5. Start development server
 python manage.py runserver 0.0.0.0:3000
